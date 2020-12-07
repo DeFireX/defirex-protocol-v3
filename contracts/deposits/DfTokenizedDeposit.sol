@@ -121,7 +121,6 @@ contract DfTokenizedDeposit is
     }
 
     function deposit(uint256 amountDAI, uint256 amountUSDC, address flashloanFromAddress) public payable {
-        require(msg.sender == tx.origin);
         require(token != IDfDepositToken(0x0));
         uint256 amountETH = msg.value;
 
@@ -198,7 +197,6 @@ contract DfTokenizedDeposit is
     }
 
     function burnTokens(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, address flashLoanFromAddress) public {
-        require(msg.sender == tx.origin);
         address _liquidityProviderAddress = liquidityProviderAddress;
         if (amountDAI > 0) amountDAI = burnTokenFast(token, IToken(DAI_ADDRESS), amountDAI, _liquidityProviderAddress);
         if (amountUSDC > 0) amountUSDC = burnTokenFast(tokenUSDC, IToken(USDC_ADDRESS), amountUSDC, _liquidityProviderAddress);
@@ -386,8 +384,6 @@ contract DfTokenizedDeposit is
     }
 
     function userClaimProfitOptimized(uint64 fromIndex, uint64 lastIndex, uint256 totalUsdtProfit, uint256 totalDaiProfit, uint8 v, bytes32 r, bytes32 s, bool isReinvest) public {
-
-        require(msg.sender == tx.origin);
         uint64 currentIndex = lastProfitDistIndex[msg.sender];
         require(currentIndex == fromIndex);
 
@@ -403,8 +399,6 @@ contract DfTokenizedDeposit is
     }
 
     function userClaimProfit(uint64 max) public {
-        require(msg.sender == tx.origin);
-
         uint64 index;
         uint256 totalUsdtProfit;
         uint256 totalDaiProfit;
