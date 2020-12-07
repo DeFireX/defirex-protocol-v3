@@ -4,8 +4,9 @@ import "@openzeppelin/upgrades/contracts/Initializable.sol";
 
 import "../access/Adminable.sol";
 
+import "./DfProfits.sol";
+
 import "../utils/DSMath.sol";
-import "../utils/UniversalERC20.sol";
 
 import "../constants/ConstantAddressesMainnet.sol";
 
@@ -14,19 +15,36 @@ import "../interfaces/IDfFinanceDeposits.sol";
 import "../interfaces/IToken.sol";
 import "../interfaces/IDfDepositToken.sol";
 import "../interfaces/IPriceOracle.sol";
+import "../interfaces/IDfInfo.sol";
 
 interface IComptroller {
     function oracle() external view returns (IPriceOracle);
+    function getAccountLiquidity(address) external view returns (uint, uint, uint);
 }
 
 interface IUniswapV2Router02 {
     function swapExactTokensForTokens(
-    uint amountIn,
-    uint amountOutMin,
-    address[] calldata path,
-    address to,
-    uint deadline
+        uint amountIn,
+        uint amountOutMin,
+        address[] calldata path,
+        address to,
+        uint deadline
     ) external returns (uint[] memory amounts);
+
+    function factory() external view returns (address);
+}
+
+interface IUniswapV2Factory {
+    function getPair(address tokenA, address tokenB) external view returns (address pair);
+}
+interface IUniswapV2Pair {
+    function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external;
+    function getReserves() external view returns (uint112 reserve0, uint112 reserve1, uint32 blockTimestampLast);
+    function sync() external;
+}
+
+interface ITokenUSDT {
+    function transfer(address to, uint value) external; // USDT don't return bool
 }
 
 contract DfTokenizedDeposit is
@@ -35,8 +53,6 @@ contract DfTokenizedDeposit is
     DSMath,
     ConstantAddresses
 {
-    using UniversalERC20 for IToken;
-
 
     struct ProfitData {
         uint64 blockNumber;
@@ -44,14 +60,13 @@ contract DfTokenizedDeposit is
         uint64 usdtProfit;
     }
 
-
     ProfitData[] public profits;
 
     IDfDepositToken public token;
     address public dfWallet;
 
     // IDfFinanceDeposits public constant dfFinanceDeposits = IDfFinanceDeposits(0xCa0648C5b4Cea7D185E09FCc932F5B0179c95F17); // Kovan
-    IDfFinanceDeposits public constant dfFinanceDeposits = IDfFinanceDeposits(0xFff9D7b0B6312ead0a1A993BF32f373449006F2F); // Mainnet
+    IDfFinanceDeposits public dfFinanceDeposits = IDfFinanceDeposits(0xFff9D7b0B6312ead0a1A993BF32f373449006F2F); // Mainnet
 
     mapping(address => uint64) public lastProfitDistIndex;
 
@@ -60,22 +75,27 @@ contract DfTokenizedDeposit is
     event CompSwap(uint256 timestamp, uint256 compPrice);
     event Profit(address indexed user, uint64 index, uint64 usdtProfit, uint64 daiProfit);
 
-    // new
     address public liquidityProviderAddress;
-    // colliteral rate
+    // ----------------------------------------------------------------------------------------
+    // all vars up to this line are used in Upgradable contract and shouldn't be changed\removed
+
+    // flash loan coefficient (supply: USER_FUNDS * (crate + 100), borrow: USER_FUNDS * crate, flashLoan: USER_FUNDS * crate)
     uint256 public crate;
     mapping(address => uint256) public fundsUnwinded;
 
     IUniswapV2Router02 constant uniRouter = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); // same for kovan and mainnet
+    IDfInfo constant dfInfo = IDfInfo(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); // TODO: kovan version
 
     IDfDepositToken public tokenETH;
     IDfDepositToken public tokenUSDC;
 
-    address constant ethProfitDepositAddress = 0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D;
     uint256 public rewardFee;
     uint256 public ethCoef;
+    IDfFinanceDeposits.FlashloanProvider public providerType;
+    uint256 public lastFixProfit;
+    DfProfits public dfProfits; // contract that contains only profit funds
+
     event Credit(address token, uint256 amount);
-    // new
 
     function initialize() public initializer {
         address payable curOwner = 0xdAE0aca4B9B38199408ffaB32562Bf7B3B0495fE;
@@ -84,7 +104,7 @@ contract DfTokenizedDeposit is
         IToken(DAI_ADDRESS).approve(address(dfFinanceDeposits), uint256(-1));
     }
 
-    // returns tokens left
+    // fastDeposit used for low-fee deposit, function returns tokens left
     function fastDeposit(IDfDepositToken dTokenAddress, address assetAddress, uint256 amount) internal returns (uint256) {
         address _liquidityProviderAddress = liquidityProviderAddress;
         if (dTokenAddress.balanceOf(_liquidityProviderAddress) >= amount && dTokenAddress.allowance(address(this), _liquidityProviderAddress) >= amount) {
@@ -105,6 +125,9 @@ contract DfTokenizedDeposit is
         require(token != IDfDepositToken(0x0));
         uint256 amountETH = msg.value;
 
+        // when dfWallet is 0, first user should deposit eth
+        require(dfWallet != address(0) || (amountETH > 0 && amountUSDC == 0 && amountDAI == 0));
+
         // fast deposit
         if (amountDAI > 0) amountDAI = fastDeposit(token, DAI_ADDRESS, amountDAI);
 
@@ -124,7 +147,7 @@ contract DfTokenizedDeposit is
             if (amountDAI  > 0)  IToken(DAI_ADDRESS).transferFrom(msg.sender, address(dfWallet), amountDAI);
             if (amountUSDC > 0)  IToken(USDC_ADDRESS).transferFrom(msg.sender, address(dfWallet), amountUSDC);
 
-            address _dfWalletNew = dfFinanceDeposits.deposit.value(amountETH)(dfWallet, amountDAI, amountUSDC, 0, flashLoanDAI, flashLoanUSDC, IDfFinanceDeposits.FlashloanProvider.DYDX, flashloanFromAddress);
+            address _dfWalletNew = dfFinanceDeposits.deposit.value(amountETH)(dfWallet, amountDAI, amountUSDC, 0, flashLoanDAI, flashLoanUSDC, providerType, flashloanFromAddress);
             if (dfWallet == address(0)) dfWallet = _dfWalletNew;
 
             if (amountDAI > 0) token.mint(msg.sender, amountDAI);
@@ -169,9 +192,9 @@ contract DfTokenizedDeposit is
         IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
         uint256 _crate = crate;
         uint256 _daiPrice = compOracle.price("DAI");
-        flashLoanDAI = amountDAI * _crate / 100;
-        if (amountUSDC > 0) flashLoanUSDC = amountUSDC * _crate / 100;
-        if (amountETH > 0) flashLoanDAI += amountETH * compOracle.price("ETH") * _daiPrice / 1e12 * 100 / ethCoef * (_crate + 100) / 100; // extract half in DAI ( / 2)
+        flashLoanDAI = wmul(amountDAI, _crate);
+        if (amountUSDC > 0) flashLoanUSDC = wmul(amountUSDC, _crate);
+        if (amountETH > 0) flashLoanDAI += wmul(wmul(amountETH * compOracle.price("ETH") * _daiPrice / 1e12, ethCoef), (_crate + 1e18));
     }
 
     function burnTokens(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, address flashLoanFromAddress) public {
@@ -187,7 +210,7 @@ contract DfTokenizedDeposit is
             uint256 flashLoanUSDC;
             (flashLoanDAI, flashLoanUSDC) = getFlashLoanAmounts(amountDAI, amountUSDC, amountETH);
 
-            dfFinanceDeposits.withdraw(dfWallet, amountDAI, amountUSDC, amountETH, 0, msg.sender, flashLoanDAI, flashLoanUSDC, IDfFinanceDeposits.FlashloanProvider.DYDX, flashLoanFromAddress);
+            dfFinanceDeposits.withdraw(dfWallet, amountDAI, amountUSDC, amountETH, 0, msg.sender, flashLoanDAI, flashLoanUSDC, providerType, flashLoanFromAddress);
 
             if (amountDAI > 0) token.burnFrom(msg.sender, amountDAI);
             if (amountUSDC > 0) tokenUSDC.burnFrom(msg.sender, amountUSDC);
@@ -195,15 +218,39 @@ contract DfTokenizedDeposit is
         }
     }
 
-    function sync(address flashLoanFromAddress, uint256 _newCRate, uint256 _newEthCoef) public onlyOwnerOrAdmin {
-        uint256 amountDAI = sub(token.totalSupply(), fundsUnwinded[DAI_ADDRESS]);
-        uint256 amountUSDC = address(tokenUSDC) == address(0x0) ? 0 : sub(tokenUSDC.totalSupply(), fundsUnwinded[USDC_ADDRESS]);
-        uint256 amountETH =  address(tokenETH) == address(0x0) ? 0 : sub(tokenETH.totalSupply(), fundsUnwinded[WETH_ADDRESS]);
-        unwindFunds(amountDAI, amountUSDC, amountETH, flashLoanFromAddress);
-        if (_newCRate > 100) crate = _newCRate;
-        if (_newEthCoef > 100) ethCoef = _newEthCoef;
-        boostFunds(amountDAI, amountUSDC, amountETH, flashLoanFromAddress);
-        // TODO: добавить валидацию
+    // amounts[0] - DAI amounts[1] - USDC amounts[2] - ETH
+    function sync(address flashLoanFromAddress, uint256 _newCRate, uint256 _newEthCoef, uint256[3] memory amounts, bool check) onlyOwnerOrAdmin public returns (uint256 avgCRate, uint256 avgEthCoef, uint256 f)  {
+        IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
+        uint256 _daiPrice = compOracle.price("DAI") * 1e12;
+        uint256 _ethPrice = compOracle.price("ETH") * 1e12;
+
+
+        unwindFunds(amounts[0], amounts[1], amounts[2], flashLoanFromAddress);
+
+        { // fix "stack too deep"
+            uint256 amountTotalETH = tokenETH.totalSupply();
+            uint256 totalShare = wdiv(amounts[0] + wmul(amounts[1] * 1e12, _daiPrice) + wmul(wmul(wmul(amounts[2], ethCoef) , _ethPrice), _daiPrice),
+                token.totalSupply() + wmul(tokenUSDC.totalSupply() * 1e12, _daiPrice) + wmul(wmul(wmul(amountTotalETH, ethCoef), _ethPrice), _daiPrice)
+            );
+            if (_newCRate > 100) {
+                avgCRate = (crate * sub(1e18, totalShare) +  _newCRate * totalShare) / 1e18;
+                crate = _newCRate;
+            }
+            if (_newEthCoef > 100) {
+                uint256 shareEth = wdiv(amounts[2], amountTotalETH);
+                avgEthCoef =  (ethCoef * sub(1e18, shareEth) +  _newEthCoef * shareEth) / 1e18;
+                ethCoef = _newEthCoef;
+            }
+        }
+
+        boostFunds(amounts[0], amounts[1], amounts[2], flashLoanFromAddress);
+
+        if (avgCRate > 0) crate = avgCRate;
+        if (avgEthCoef > 0) ethCoef = avgEthCoef;
+
+        if (check) {
+            (,,,,f,,,) = dfInfo.getInfo(address(this));
+        }
     }
 
     function unwindFunds(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, address flashLoanFromAddress) public onlyOwnerOrAdmin {
@@ -216,7 +263,7 @@ contract DfTokenizedDeposit is
         if (amountDAI > 0) balanceDAI = IToken(DAI_ADDRESS).balanceOf(address(this));
         if (amountUSDC > 0) balanceUSDC = IToken(USDC_ADDRESS).balanceOf(address(this));
         // amountETH = -1
-        dfFinanceDeposits.withdraw(dfWallet, amountDAI, amountUSDC, amountETH, 0, address(this), flashLoanDAI, flashLoanUSDC, IDfFinanceDeposits.FlashloanProvider.DYDX, flashLoanFromAddress);
+        dfFinanceDeposits.withdraw(dfWallet, amountDAI, amountUSDC, amountETH, 0, address(this), flashLoanDAI, flashLoanUSDC, providerType, flashLoanFromAddress);
 
         if (amountDAI > 0) {
             balanceDAI = sub(IToken(DAI_ADDRESS).balanceOf(address(this)), balanceDAI);
@@ -245,23 +292,28 @@ contract DfTokenizedDeposit is
         (flashLoanDAI, flashLoanUSDC) = getFlashLoanAmounts(amountDAI, amountUSDC, amountETH);
         if (amountDAI  > 0)  IToken(DAI_ADDRESS).transfer(address(dfWallet), amountDAI);
         if (amountUSDC > 0)  IToken(USDC_ADDRESS).transfer(address(dfWallet), amountUSDC);
-        dfFinanceDeposits.deposit.value(amountETH)(dfWallet, amountDAI, amountUSDC, 0, flashLoanDAI, flashLoanUSDC, IDfFinanceDeposits.FlashloanProvider.DYDX, flashLoanFromAddress);
+        dfFinanceDeposits.deposit.value(amountETH)(dfWallet, amountDAI, amountUSDC, 0, flashLoanDAI, flashLoanUSDC, providerType, flashLoanFromAddress);
         if (amountDAI > 0) fundsUnwinded[DAI_ADDRESS] = sub(fundsUnwinded[DAI_ADDRESS], amountDAI);
         if (amountUSDC > 0) fundsUnwinded[USDC_ADDRESS] = sub(fundsUnwinded[USDC_ADDRESS], amountUSDC);
         if (amountETH > 0) fundsUnwinded[WETH_ADDRESS] = sub(fundsUnwinded[WETH_ADDRESS], amountETH);
     }
 
+    uint256 constant snapshotOffset = 0; // TODO: offset for new tokens
 
     function userShare(address userAddress, uint256 snapshotId) view public returns (uint256 totalLiquidity, uint256 totalSupplay) {
-        uint256 priceETH = tokenETH.prices(snapshotId);
-        uint256 offset = 0; // TODO: offset for new tokens
-        totalLiquidity = token.balanceOfAt(userAddress, snapshotId) +
-                            mul(tokenETH.balanceOfAt(userAddress, snapshotId + offset), priceETH) / 1e6 * 100 / ethCoef + // ETH price 6 decimals
-                            tokenUSDC.balanceOfAt(userAddress, snapshotId  + offset) * 1e12; // USDC 6 decimals => 18, suggest 1 DAI == 1 USDC
+        if (snapshotId == uint256(-1)) snapshotId = profits.length;
+        require(snapshotId > snapshotOffset);
 
+        uint256 priceETH = tokenETH.prices(snapshotId);
+
+        totalLiquidity = token.balanceOfAt(userAddress, snapshotId) +
+        mul(tokenETH.balanceOfAt(userAddress, snapshotId - snapshotOffset), priceETH) / 1e6 * 100 / ethCoef + // ETH price 6 decimals
+        tokenUSDC.balanceOfAt(userAddress, snapshotId - snapshotOffset) * 1e12;                               // USDC 6 decimals => 18, suggest 1 DAI == 1 USDC
+
+        // totalSupplay for rewards distribution (we extract from eth `ethCoef`% DAI)
         totalSupplay = token.totalSupplyAt(snapshotId) +
-                            mul(tokenETH.totalSupplyAt(snapshotId), priceETH) / 1e6 + // ETH price 6 decimals
-                            tokenUSDC.totalSupplyAt(snapshotId) * 1e12; // USDC 6 decimals => 18
+        wmul(mul(tokenETH.totalSupplyAt(snapshotId - snapshotOffset), priceETH) / 1e6, ethCoef) +  // ETH price 6 decimals
+        tokenUSDC.totalSupplyAt(snapshotId - snapshotOffset) * 1e12;                               // USDC 6 decimals => 18
     }
 
     function getUserProfitFromCustomIndex(address userAddress, uint64 fromIndex, uint256 max) public view returns(
@@ -290,6 +342,49 @@ contract DfTokenizedDeposit is
         (totalUsdtProfit, totalDaiProfit, index) = getUserProfitFromCustomIndex(userAddress, lastProfitDistIndex[userAddress], max);
     }
 
+    function sendRewardToUser(uint64 _index, uint256 _totalUsdtProfit, uint256 _totalDaiProfit, bool _isReinvest) internal {
+        lastProfitDistIndex[msg.sender] = _index;
+
+        // usdt rewards from old contract implementation
+        if (_totalUsdtProfit > 0) {
+            ITokenUSDT(USDT_ADDRESS).transfer(msg.sender, _totalUsdtProfit);
+        }
+
+        if (_totalDaiProfit > 0) {
+            dfProfits.cast(address(uint160(DAI_ADDRESS)), abi.encodeWithSelector(IToken(DAI_ADDRESS).transfer.selector, msg.sender, _totalDaiProfit));
+            if (_isReinvest) {
+                deposit(_totalDaiProfit, 0, address(0x0));
+            }
+        }
+    }
+
+    function getUniswapAddress() view public returns (address) {
+        return IUniswapV2Factory(uniRouter.factory()).getPair(DAI_ADDRESS, address(token));
+    }
+
+    // claiming profit for uniswap pool
+    function claimProfitForUniswap() public {
+        require(msg.sender == tx.origin);
+
+        uint64 index;
+        uint256 totalDaiProfit;
+        address _uniswapAddress = getUniswapAddress();
+        (, totalDaiProfit, index) = calcUserProfit(_uniswapAddress, uint256(-1));
+
+        lastProfitDistIndex[_uniswapAddress] = index;
+
+        if (totalDaiProfit > 0) {
+            dfProfits.cast(address(uint160(DAI_ADDRESS)), abi.encodeWithSelector(IToken(DAI_ADDRESS).transfer.selector, _uniswapAddress, totalDaiProfit));
+            (uint reserveIn, uint reserveOut,) = IUniswapV2Pair(_uniswapAddress).getReserves();
+            uint amountInWithFee = mul(totalDaiProfit / 2, 997);
+            uint numerator = mul(amountInWithFee, reserveOut);
+            uint denominator = add(mul(reserveIn, 1000), amountInWithFee);
+            uint amountOut = numerator / denominator;
+            IUniswapV2Pair(_uniswapAddress).swap(amountOut, 0, address(_uniswapAddress), new bytes(0));
+            IUniswapV2Pair(_uniswapAddress).sync();
+        }
+    }
+
     function userClaimProfitOptimized(uint64 fromIndex, uint64 lastIndex, uint256 totalUsdtProfit, uint256 totalDaiProfit, uint8 v, bytes32 r, bytes32 s, bool isReinvest) public {
 
         require(msg.sender == tx.origin);
@@ -300,22 +395,11 @@ contract DfTokenizedDeposit is
         uint256 versionNonce = 1;
         bytes32 hash = sha256(abi.encodePacked(this, versionNonce, msg.sender, fromIndex, lastIndex, totalUsdtProfit, totalDaiProfit));
         address src = ecrecover(keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash)), v, r, s);
-        require(admins[src] == true, "Access denied");
+        require(admins[src] == true);
 
         require(currentIndex < lastIndex);
 
-        lastProfitDistIndex[msg.sender] = lastIndex;
-
-        if (totalUsdtProfit > 0) {
-            IToken(USDT_ADDRESS).universalTransfer(msg.sender, totalUsdtProfit);
-        }
-
-        if (totalDaiProfit > 0) {
-            IToken(DAI_ADDRESS).transfer(msg.sender, totalDaiProfit);
-            if (isReinvest) {
-                deposit(totalDaiProfit, 0, address(0x0));
-            }
-        }
+        sendRewardToUser(lastIndex, totalUsdtProfit, totalDaiProfit, isReinvest);
     }
 
     function userClaimProfit(uint64 max) public {
@@ -326,72 +410,45 @@ contract DfTokenizedDeposit is
         uint256 totalDaiProfit;
         (totalUsdtProfit, totalDaiProfit, index) = calcUserProfit(msg.sender, max);
 
-        lastProfitDistIndex[msg.sender] = index;
-
-        if (totalUsdtProfit > 0) {
-            IToken(USDT_ADDRESS).universalTransfer(msg.sender, totalUsdtProfit);
-        }
-
-        if (totalDaiProfit > 0) {
-            IToken(DAI_ADDRESS).transfer(msg.sender, totalDaiProfit);
-        }
-    }
-
-    function setUSDTExchangeAddress(address _newAddress) public onlyOwnerOrAdmin {
-        usdtExchanger = _newAddress;
-    }
-
-    function adminClaimProfitAndInternalSwapToDAI(uint256 _compPriceInDai, address[] memory ctokens) public onlyOwnerOrAdmin returns (uint256 amountComps, uint256 amountDai) {
-        // Claim comps without exchange
-        amountComps = dfFinanceDeposits.claimComps(dfWallet, ctokens);
-        amountDai = wmul(amountComps, _compPriceInDai); // COMP to USDT
-
-        IToken(DAI_ADDRESS).transferFrom(usdtExchanger, address(this), amountDai);
-        IToken(COMP_ADDRESS).transfer(usdtExchanger, amountComps);
-
-        ProfitData memory p;
-        p.blockNumber = uint64(block.number);
-
-        uint256 _fee = amountDai * rewardFee / 100;
-        IToken(DAI_ADDRESS).transfer(owner, _fee);
-        amountDai = sub(amountDai, _fee);
-
-        p.daiProfit = p.daiProfit + uint64(amountDai / 1e12); // // reduce decimals to 1e6
-        profits.push(p);
-
-        token.snapshot();
-        IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
-        if (address(tokenETH) != address(0x0)) tokenETH.snapshot(compOracle.price("ETH"));
-        if (address(tokenUSDC) != address(0x0)) tokenUSDC.snapshot();
-
-        emit CompSwap(block.timestamp, _compPriceInDai);
+        sendRewardToUser(index, totalUsdtProfit, totalDaiProfit, false);
     }
 
     function getCompPriceInDAI() view public returns(uint256) {
-        //  price not less that price from oracle with 3% slippage
+        //  price not less that price from oracle with 5% slippage
         IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
-        return compOracle.price("COMP") * 1e18 / compOracle.price("DAI") * 97 / 100;
+        return compOracle.price("COMP") * 1e18 / compOracle.price("DAI") * 95 / 100;
     }
 
     // profit in DAI
-    function adminClaimProfit(address[] memory path, uint256 minAmount, address[] memory ctokens) public onlyOwnerOrAdmin returns (uint256) {
-        require(path[path.length - 1] == DAI_ADDRESS);
+    function fixProfit() public returns (uint256) {
+        require(msg.sender == tx.origin); // to prevent flash-loan attack
+        require(now - lastFixProfit > 12 hours);
+        address [] memory path = new address[](3);
+        path[0] = COMP_ADDRESS;
+        path[1] = WETH_ADDRESS;
+        path[2] = DAI_ADDRESS;
+        address [] memory ctokens = new address[](3);
+        ctokens[0] = CDAI_ADDRESS;
+        ctokens[1] = CETH_ADDRESS;
+        ctokens[2] = CUSDC_ADDRESS;
 
-//        userShare( profits.length)
         uint256 amount = dfFinanceDeposits.claimComps(dfWallet, ctokens);
         ProfitData memory p;
         p.blockNumber = uint64(block.number);
-        // TODO use uniswap pool to convert
+
         if (IToken(COMP_ADDRESS).allowance(address(this), address(uniRouter)) != uint256(-1)) {
             IToken(COMP_ADDRESS).approve(address(uniRouter), uint256(-1));
         }
-        uint256 balance = IToken(DAI_ADDRESS).balanceOf(address(this));
-        uint256 minDaiFromSwap = wmul(getCompPriceInDAI(), amount);
-        minDaiFromSwap = 1; // TODO: for Kovan test, remove it in mainnet
-        uniRouter.swapExactTokensForTokens(amount, minDaiFromSwap, path, address(this), now + 1000);
 
-        uint256 _reward = sub(IToken(DAI_ADDRESS).balanceOf(address(this)), balance);
-        require(_reward >= minAmount);
+        if (dfProfits == DfProfits(0x0)) dfProfits = new DfProfits(address(this));
+
+        uint256 balance = IToken(DAI_ADDRESS).balanceOf(address(dfProfits));
+        uint256 minDaiFromSwap = wmul(getCompPriceInDAI(), amount);
+        minDaiFromSwap = 1; // TODO: for Kovan testnet, remove it in mainnet
+
+        uniRouter.swapExactTokensForTokens(amount, minDaiFromSwap, path, address(dfProfits), now + 1000);
+
+        uint256 _reward = sub(IToken(DAI_ADDRESS).balanceOf(address(dfProfits)), balance);
 
         emit CompSwap(block.timestamp, wdiv(_reward, amount));
 
@@ -407,18 +464,13 @@ contract DfTokenizedDeposit is
         if (address(tokenETH) != address(0x0)) tokenETH.snapshot(compOracle.price("ETH"));
         if (address(tokenUSDC) != address(0x0)) tokenUSDC.snapshot();
 
+        lastFixProfit = now;
         return p.daiProfit;
     }
 
     function setLiquidityProviderAddress(address _newAddress) public onlyOwner {
         liquidityProviderAddress = _newAddress;
     }
-
-    function setCRateOnce(uint256 _newRate) public onlyOwner {
-        require(crate == 0 && _newRate < 295);
-        crate = _newRate;
-    }
-
 
     function setupTokenETHOnce(address _newAddress) public onlyOwner {
         require(address(tokenETH) == address(0x0));
@@ -436,8 +488,18 @@ contract DfTokenizedDeposit is
     }
 
     function changeEthCoef(uint256 _newCoef) public onlyOwnerOrAdmin {
-        require(_newCoef >= 200);
+        require(_newCoef >= 1e18 / 2);
         ethCoef = _newCoef;
+    }
+
+    function changeCRate(uint256 _newRate) public onlyOwnerOrAdmin {
+        require(_newRate >= 2e18);
+        crate = _newRate;
+    }
+
+
+    function setProviderType(IDfFinanceDeposits.FlashloanProvider _newProviderType) public onlyOwnerOrAdmin {
+        providerType = _newProviderType;
     }
 
     // **FALLBACK functions**
