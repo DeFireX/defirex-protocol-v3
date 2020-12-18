@@ -43,25 +43,6 @@ contract ERC20Delegatable is
         _;
     }
 
-    modifier onlyVerified(
-        address delegator,
-        address recipient,
-        uint256 amount,
-        uint256 maxAllowedTimestamp,
-        bytes memory _signature // signature is v, r, s for ECDSA
-    ) {
-        require(now < maxAllowedTimestamp, "sign is expired");
-
-        bytes32 hash = keccak256(abi.encodePacked(
-            address(this),
-            recipient,
-            amount,
-            maxAllowedTimestamp
-        ));
-        require(delegator == hash.recover(_signature), "This action is not verified");
-        _;
-    }
-
 
     // ** PUBLIC view function **
 
@@ -83,39 +64,6 @@ contract ERC20Delegatable is
 
     function undelgate(address recipient, uint256 amount) public returns(bool) {
         _undelegate(msg.sender, recipient, amount);
-        return true;
-    }
-
-
-    // ** PUBLIC with SIGN function **
-
-    function delgateWithSign(
-        address delegator,
-        address recipient,
-        uint256 amount,
-        uint256 maxAllowedTimestamp,
-        bytes memory _signature // signature is v, r, s for ECDSA
-    ) public
-        onlyVerified(delegator, recipient, amount, maxAllowedTimestamp, _signature)
-    returns(
-        bool
-    ) {
-        _delegate(delegator, recipient, amount);
-        return true;
-    }
-
-    function undelgateWithSign(
-        address delegator,
-        address recipient,
-        uint256 amount,
-        uint256 maxAllowedTimestamp,
-        bytes memory _signature // signature is v, r, s for ECDSA
-    ) public
-        onlyVerified(delegator, recipient, amount, maxAllowedTimestamp, _signature)
-    returns(
-        bool
-    ) {
-        _undelegate(delegator, recipient, amount);
         return true;
     }
 
