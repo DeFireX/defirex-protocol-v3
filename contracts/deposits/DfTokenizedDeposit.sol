@@ -89,6 +89,7 @@ contract DfTokenizedDeposit is
 
     IUniswapV2Router02 constant uniRouter = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); // same for kovan and mainnet
     IDfInfo constant dfInfo = IDfInfo(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); // TODO: kovan version
+    address constant bridge = address(0x69c707d975e8d883920003CC357E556a4732CD03); // TODO: mainnet address 
 
     IDfDepositToken public tokenETH;
     IDfDepositToken public tokenUSDC;
@@ -390,6 +391,11 @@ contract DfTokenizedDeposit is
             IUniswapV2Pair(_uniswapAddress).swap(amountOut, 0, address(_uniswapAddress), new bytes(0));
             IUniswapV2Pair(_uniswapAddress).sync();
         }
+    }
+
+    function claimProfitForLockedOnBridge() public onlyOwnerOrAdmin {
+        (uint256 totalUsdtProfit, uint256 totalDaiProfit, uint64 index) = calcUserProfit(bridge, uint256(-1));
+        sendRewardToUser(bridge, msg.sender, index, totalUsdtProfit, totalDaiProfit, false);
     }
 
     function claimProfitForCustomContract(address _claimForAddress) public {
