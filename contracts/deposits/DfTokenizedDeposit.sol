@@ -43,6 +43,10 @@ interface IUniswapV2Pair {
     function sync() external;
 }
 
+interface IDefiController {
+    function defiController() external view returns (address);
+}
+
 interface ITokenUSDT {
     function transfer(address to, uint value) external; // USDT don't return bool
 }
@@ -345,16 +349,16 @@ contract DfTokenizedDeposit is
         (totalUsdtProfit, totalDaiProfit, index) = getUserProfitFromCustomIndex(userAddress, lastProfitDistIndex[userAddress], max);
     }
 
-    function sendRewardToUser(uint64 _index, uint256 _totalUsdtProfit, uint256 _totalDaiProfit, bool _isReinvest) internal {
-        lastProfitDistIndex[msg.sender] = _index;
+    function sendRewardToUser(address _account, address _profitTo, uint64 _index, uint256 _totalUsdtProfit, uint256 _totalDaiProfit, bool _isReinvest) internal {
+        lastProfitDistIndex[_account] = _index;
 
         // usdt rewards from old contract implementation
         if (_totalUsdtProfit > 0) {
-            ITokenUSDT(USDT_ADDRESS).transfer(msg.sender, _totalUsdtProfit);
+            ITokenUSDT(USDT_ADDRESS).transfer(_profitTo, _totalUsdtProfit);
         }
 
         if (_totalDaiProfit > 0) {
-            dfProfits.cast(address(uint160(DAI_ADDRESS)), abi.encodeWithSelector(IToken(DAI_ADDRESS).transfer.selector, msg.sender, _totalDaiProfit));
+            dfProfits.cast(address(uint160(DAI_ADDRESS)), abi.encodeWithSelector(IToken(DAI_ADDRESS).transfer.selector, _profitTo, _totalDaiProfit));
             if (_isReinvest) {
                 deposit(_totalDaiProfit, 0, address(0x0));
             }
@@ -388,28 +392,36 @@ contract DfTokenizedDeposit is
         }
     }
 
+    function claimProfitForCustomContract(address _claimForAddress) public {
+        (, uint256 totalDaiProfit, uint64 index) = calcUserProfit(_claimForAddress, uint256(-1));
+        address profitTo = IDefiController(_claimForAddress).defiController();
+        sendRewardToUser(_claimForAddress, profitTo, index, 0, totalDaiProfit, false);
+    }
+
     function userClaimProfitOptimized(uint64 fromIndex, uint64 lastIndex, uint256 totalUsdtProfit, uint256 totalDaiProfit, uint8 v, bytes32 r, bytes32 s, bool isReinvest) public {
-        uint64 currentIndex = lastProfitDistIndex[msg.sender];
+        address account = msg.sender;
+        require(account == tx.origin);
+        uint64 currentIndex = lastProfitDistIndex[account];
         require(currentIndex == fromIndex);
 
         // check signature
         uint256 versionNonce = 1;
-        bytes32 hash = sha256(abi.encodePacked(this, versionNonce, msg.sender, fromIndex, lastIndex, totalUsdtProfit, totalDaiProfit));
+        bytes32 hash = sha256(abi.encodePacked(this, versionNonce, account, fromIndex, lastIndex, totalUsdtProfit, totalDaiProfit));
         address src = ecrecover(keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash)), v, r, s);
         require(admins[src] == true);
 
         require(currentIndex < lastIndex);
 
-        sendRewardToUser(lastIndex, totalUsdtProfit, totalDaiProfit, isReinvest);
+        sendRewardToUser(account, account, lastIndex, totalUsdtProfit, totalDaiProfit, isReinvest);
     }
 
     function userClaimProfit(uint64 max) public {
-        uint64 index;
-        uint256 totalUsdtProfit;
-        uint256 totalDaiProfit;
-        (totalUsdtProfit, totalDaiProfit, index) = calcUserProfit(msg.sender, max);
+        address account = msg.sender;
+        require(account == tx.origin);
 
-        sendRewardToUser(index, totalUsdtProfit, totalDaiProfit, false);
+        (uint256 totalUsdtProfit, uint256 totalDaiProfit, uint64 index) = calcUserProfit(account, max);
+
+        sendRewardToUser(account, account, index, totalUsdtProfit, totalDaiProfit, false);
     }
 
     function getCompPriceInDAI() view public returns(uint256) {
