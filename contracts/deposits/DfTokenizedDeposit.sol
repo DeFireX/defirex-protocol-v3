@@ -216,6 +216,11 @@ contract DfTokenizedDeposit is
         }
     }
 
+    // wrapper-function for dai
+    function burnTokens(uint256 amountDAI, bool useFlashLoan) public {
+        burnTokens(amountDAI, 0, 0, address(0));
+    }
+
     // amounts[0] - DAI amounts[1] - USDC amounts[2] - ETH
     function sync(address flashLoanFromAddress, uint256 _newCRate, uint256 _newEthCoef, uint256[3] memory amounts, bool check) onlyOwnerOrAdmin public returns (uint256 avgCRate, uint256 avgEthCoef, uint256 f)  {
         IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
