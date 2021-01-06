@@ -69,9 +69,6 @@ contract DfTokenizedDeposit is
     IDfDepositToken public token;
     address public dfWallet;
 
-    // IDfFinanceDeposits public constant dfFinanceDeposits = IDfFinanceDeposits(0xCa0648C5b4Cea7D185E09FCc932F5B0179c95F17); // Kovan
-    IDfFinanceDeposits public dfFinanceDeposits = IDfFinanceDeposits(0xFff9D7b0B6312ead0a1A993BF32f373449006F2F); // Mainnet
-
     mapping(address => uint64) public lastProfitDistIndex;
 
     address usdtExchanger;
@@ -87,9 +84,11 @@ contract DfTokenizedDeposit is
     uint256 public crate;
     mapping(address => uint256) public fundsUnwinded;
 
+    IDfFinanceDeposits public constant dfFinanceDeposits = IDfFinanceDeposits(0xFff9D7b0B6312ead0a1A993BF32f373449006F2F); // mainnet address
+
     IUniswapV2Router02 constant uniRouter = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); // same for kovan and mainnet
-    IDfInfo constant dfInfo = IDfInfo(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); // TODO: kovan version
-    address constant bridge = address(0x69c707d975e8d883920003CC357E556a4732CD03); // TODO: mainnet address 
+    IDfInfo constant dfInfo = IDfInfo(0xee5aEb4314BF8C0A2f0A704305E599343480DbF1); // mainnet address
+    address constant bridge = address(0x69c707d975e8d883920003CC357E556a4732CD03); // mainnet address 
 
     IDfDepositToken public tokenETH;
     IDfDepositToken public tokenUSDC;
@@ -306,7 +305,7 @@ contract DfTokenizedDeposit is
         if (amountETH > 0) fundsUnwinded[WETH_ADDRESS] = sub(fundsUnwinded[WETH_ADDRESS], amountETH);
     }
 
-    uint256 constant snapshotOffset = 0; // TODO: offset for new tokens
+    uint256 constant snapshotOffset = 72; // offset for new tokens
 
     function userShare(address userAddress, uint256 snapshotId) view public returns (uint256 totalLiquidity, uint256 totalSupplay) {
         if (snapshotId == uint256(-1)) snapshotId = profits.length;
@@ -461,7 +460,6 @@ contract DfTokenizedDeposit is
 
         uint256 balance = IToken(DAI_ADDRESS).balanceOf(address(dfProfits));
         uint256 minDaiFromSwap = wmul(getCompPriceInDAI(), amount);
-        minDaiFromSwap = 1; // TODO: for Kovan testnet, remove it in mainnet
 
         uniRouter.swapExactTokensForTokens(amount, minDaiFromSwap, path, address(dfProfits), now + 1000);
 
