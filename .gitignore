@@ -3,7 +3,5 @@ build
 networks.js
 package-lock.json
 
-secrets.json
-
-truffle.js
-truffle-config.js
+.env
+.openzeppelin
