@@ -76,9 +76,12 @@ contract DfTokenizedDeposit is
     event CompSwap(uint256 timestamp, uint256 compPrice);
     event Profit(address indexed user, uint64 index, uint64 usdtProfit, uint64 daiProfit);
 
-    address public liquidityProviderAddress;
+    mapping(address => bool) public approvedContracts; // mapping from old implementation
+
     // ----------------------------------------------------------------------------------------
     // all vars up to this line are used in Upgradable contract and shouldn't be changed\removed
+
+    address public liquidityProviderAddress;
 
     // flash loan coefficient (supply: USER_FUNDS * (crate + 100), borrow: USER_FUNDS * crate, flashLoan: USER_FUNDS * crate)
     uint256 public crate;
@@ -97,7 +100,7 @@ contract DfTokenizedDeposit is
     uint256 public ethCoef;
     IDfFinanceDeposits.FlashloanProvider public providerType;
     uint256 public lastFixProfit;
-    DfProfits public dfProfits; // contract that contains only profit funds
+    DfProfits constant dfProfits = DfProfits(0x65D4853d663CeE114A0aA1c946E95479C53e78c2); // contract that contains only profit funds
 
     event Credit(address token, uint256 amount);
 
@@ -106,6 +109,14 @@ contract DfTokenizedDeposit is
         Adminable.initialize(curOwner);  // Initialize Parent Contract
 
         IToken(DAI_ADDRESS).approve(address(dfFinanceDeposits), uint256(-1));
+    }
+    function migrateToV2Once() public {
+        require(tokenETH == IDfDepositToken(0x0) && tokenUSDC == IDfDepositToken(0x0) && rewardFee == 0 && crate == 0 && ethCoef == 0);
+        crate = 290 * 1e18 / 100;
+        ethCoef = 1e18 / 2;
+        rewardFee = 20; // 20%
+        tokenUSDC = IDfDepositToken(/*TODO*/);
+        tokenETH = IDfDepositToken(/*TODO*/);
     }
 
     // fastDeposit used for low-fee deposit, function returns tokens left
@@ -194,10 +205,12 @@ contract DfTokenizedDeposit is
     function getFlashLoanAmounts(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH) internal returns (uint256 flashLoanDAI, uint256 flashLoanUSDC) {
         IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
         uint256 _crate = crate;
+        uint256 _ethCoef = ethCoef;
+        require(_crate > 0 && _ethCoef > 0);
         uint256 _daiPrice = compOracle.price("DAI");
         flashLoanDAI = wmul(amountDAI, _crate);
         if (amountUSDC > 0) flashLoanUSDC = wmul(amountUSDC, _crate);
-        if (amountETH > 0) flashLoanDAI += wmul(wmul(amountETH * compOracle.price("ETH") * _daiPrice / 1e12, ethCoef), (_crate + 1e18));
+        if (amountETH > 0) flashLoanDAI += wmul(wmul(amountETH * compOracle.price("ETH") * _daiPrice / 1e12, _ethCoef), (_crate + 1e18));
     }
 
     function burnTokens(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, address flashLoanFromAddress) public {
@@ -230,7 +243,6 @@ contract DfTokenizedDeposit is
         IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
         uint256 _daiPrice = compOracle.price("DAI") * 1e12;
         uint256 _ethPrice = compOracle.price("ETH") * 1e12;
-
 
         unwindFunds(amounts[0], amounts[1], amounts[2], flashLoanFromAddress);
 
@@ -456,8 +468,6 @@ contract DfTokenizedDeposit is
             IToken(COMP_ADDRESS).approve(address(uniRouter), uint256(-1));
         }
 
-        if (dfProfits == DfProfits(0x0)) dfProfits = new DfProfits(address(this));
-
         uint256 balance = IToken(DAI_ADDRESS).balanceOf(address(dfProfits));
         uint256 minDaiFromSwap = wmul(getCompPriceInDAI(), amount);
 
@@ -487,28 +497,18 @@ contract DfTokenizedDeposit is
         liquidityProviderAddress = _newAddress;
     }
 
-    function setupTokenETHOnce(address _newAddress) public onlyOwner {
-        require(address(tokenETH) == address(0x0));
-        tokenETH = IDfDepositToken(_newAddress);
-    }
-
-    function setupTokenUSDCOnce(address _newAddress) public onlyOwner {
-        require(address(tokenUSDC) == address(0x0));
-        tokenUSDC = IDfDepositToken(_newAddress);
-    }
-
     function setRewardFee(uint256 _newRewardFee) public onlyOwner {
         require(_newRewardFee < 50);
         rewardFee = _newRewardFee;
     }
 
     function changeEthCoef(uint256 _newCoef) public onlyOwnerOrAdmin {
-        require(_newCoef >= 1e18 / 2);
+        require(_newCoef < 2e18); // normal - 50% == 0.5 == 1e18 / 2
         ethCoef = _newCoef;
     }
 
     function changeCRate(uint256 _newRate) public onlyOwnerOrAdmin {
-        require(_newRate >= 2e18);
+        // normal 2.9 == 290 * 1e18 / 100
         crate = _newRate;
     }
 
