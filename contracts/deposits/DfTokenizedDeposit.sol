@@ -399,9 +399,9 @@ contract DfTokenizedDeposit is
     }
 
     function claimProfitForCustomContract(address _claimForAddress) public {
-        (, uint256 totalDaiProfit, uint64 index) = calcUserProfit(_claimForAddress, uint256(-1));
+        (uint256 totalUsdtProfit, uint256 totalDaiProfit, uint64 index) = calcUserProfit(_claimForAddress, uint256(-1));
         address profitTo = IDefiController(_claimForAddress).defiController();
-        sendRewardToUser(_claimForAddress, profitTo, index, 0, totalDaiProfit, false);
+        sendRewardToUser(_claimForAddress, profitTo, index, totalUsdtProfit, totalDaiProfit, false);
     }
 
     function userClaimProfitOptimized(uint64 fromIndex, uint64 lastIndex, uint256 totalUsdtProfit, uint256 totalDaiProfit, uint8 v, bytes32 r, bytes32 s, bool isReinvest) public {
