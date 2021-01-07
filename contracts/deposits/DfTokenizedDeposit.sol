@@ -115,8 +115,8 @@ contract DfTokenizedDeposit is
         crate = 290 * 1e18 / 100;
         ethCoef = 1e18 / 2;
         rewardFee = 20; // 20%
-        tokenUSDC = IDfDepositToken(/*TODO*/);
-        tokenETH = IDfDepositToken(/*TODO*/);
+        tokenUSDC = IDfDepositToken(0x443A024a95a3Ae20b6aA59C93cc37bF7a3bEf7B2);
+        tokenETH = IDfDepositToken(0xF145A9e7Edc6D5a27BBdd16E4E29F5Fe56671A22);
     }
 
     // fastDeposit used for low-fee deposit, function returns tokens left
