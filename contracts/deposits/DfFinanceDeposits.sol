@@ -87,7 +87,7 @@ contract DfFinanceDeposits is
 
     IDfWalletFactory public dfWalletFactory;
 
-    uint256 public DELETED_fee; // DELETED state
+    uint256 private DELETED_fee; // DELETED state
 
     mapping(address => UserData) public wallets;
 
