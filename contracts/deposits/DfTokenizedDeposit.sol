@@ -453,7 +453,7 @@ contract DfTokenizedDeposit is
     // profit in DAI
     function fixProfit() public returns (uint256) {
         require(msg.sender == tx.origin); // to prevent flash-loan attack
-        require(now - lastFixProfit > 12 hours);
+        require(now - lastFixProfit > 6 hours);
         address [] memory path = new address[](3);
         path[0] = COMP_ADDRESS;
         path[1] = WETH_ADDRESS;
