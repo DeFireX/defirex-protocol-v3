@@ -137,6 +137,7 @@ contract DfTokenizedDeposit is
 
     function deposit(uint256 amountDAI, uint256 amountUSDC, address flashloanFromAddress) public payable {
         require(token != IDfDepositToken(0x0));
+        require(msg.sender == tx.origin  || approvedContracts[msg.sender]);
         uint256 amountETH = msg.value;
 
         // when dfWallet is 0, first user should deposit eth
@@ -214,6 +215,8 @@ contract DfTokenizedDeposit is
     }
 
     function burnTokens(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, address flashLoanFromAddress) public {
+        require(msg.sender == tx.origin  || approvedContracts[msg.sender]);
+
         address _liquidityProviderAddress = liquidityProviderAddress;
         if (amountDAI > 0) amountDAI = burnTokenFast(token, IToken(DAI_ADDRESS), amountDAI, _liquidityProviderAddress);
         if (amountUSDC > 0) amountUSDC = burnTokenFast(tokenUSDC, IToken(USDC_ADDRESS), amountUSDC, _liquidityProviderAddress);
