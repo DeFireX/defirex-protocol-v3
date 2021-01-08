@@ -324,18 +324,23 @@ contract DfTokenizedDeposit is
 
     function userShare(address userAddress, uint256 snapshotId) view public returns (uint256 totalLiquidity, uint256 totalSupplay) {
         if (snapshotId == uint256(-1)) snapshotId = profits.length;
-        require(snapshotId > snapshotOffset);
 
-        uint256 priceETH = tokenETH.prices(snapshotId);
+        totalLiquidity = token.balanceOfAt(userAddress, snapshotId);
+        totalSupplay = token.totalSupplyAt(snapshotId);
 
-        totalLiquidity = token.balanceOfAt(userAddress, snapshotId) +
-        mul(tokenETH.balanceOfAt(userAddress, snapshotId - snapshotOffset), priceETH) / 1e6 * 100 / ethCoef + // ETH price 6 decimals
-        tokenUSDC.balanceOfAt(userAddress, snapshotId - snapshotOffset) * 1e12;                               // USDC 6 decimals => 18, suggest 1 DAI == 1 USDC
+        if (snapshotId > snapshotOffset) {
+            uint256 newId = snapshotId - snapshotOffset;
+            uint256 priceETH = tokenETH.prices(newId);
 
-        // totalSupplay for rewards distribution (we extract from eth `ethCoef`% DAI)
-        totalSupplay = token.totalSupplyAt(snapshotId) +
-        wmul(mul(tokenETH.totalSupplyAt(snapshotId - snapshotOffset), priceETH) / 1e6, ethCoef) +  // ETH price 6 decimals
-        tokenUSDC.totalSupplyAt(snapshotId - snapshotOffset) * 1e12;                               // USDC 6 decimals => 18
+            totalLiquidity +=
+            mul(tokenETH.balanceOfAt(userAddress, newId), priceETH) / 1e6 * 100 / ethCoef + // ETH price 6 decimals
+            tokenUSDC.balanceOfAt(userAddress, newId) * 1e12;                               // USDC 6 decimals => 18, suggest 1 DAI == 1 USDC
+
+            // totalSupplay for rewards distribution (we extract from eth `ethCoef`% DAI)
+            totalSupplay +=
+            wmul(mul(tokenETH.totalSupplyAt(newId), priceETH) / 1e6, ethCoef) +  // ETH price 6 decimals
+            tokenUSDC.totalSupplyAt(newId) * 1e12;                               // USDC 6 decimals => 18
+        }
     }
 
     function getUserProfitFromCustomIndex(address userAddress, uint64 fromIndex, uint256 max) public view returns(
