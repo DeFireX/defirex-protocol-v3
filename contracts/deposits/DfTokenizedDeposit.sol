@@ -320,7 +320,7 @@ contract DfTokenizedDeposit is
         if (amountETH > 0) fundsUnwinded[WETH_ADDRESS] = sub(fundsUnwinded[WETH_ADDRESS], amountETH);
     }
 
-    uint256 constant snapshotOffset = 72; // offset for new tokens
+    uint256 constant snapshotOffset = 73; // offset for new tokens
 
     function userShare(address userAddress, uint256 snapshotId) view public returns (uint256 totalLiquidity, uint256 totalSupplay) {
         if (snapshotId == uint256(-1)) snapshotId = profits.length;
