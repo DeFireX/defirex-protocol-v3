@@ -486,7 +486,7 @@ contract DfTokenizedDeposit is
         emit CompSwap(block.timestamp, wdiv(_reward, amount));
 
         uint256 _fee = _reward * rewardFee / 100;
-        IToken(DAI_ADDRESS).transfer(owner, _fee);
+        dfProfits.cast(address(uint160(DAI_ADDRESS)), abi.encodeWithSelector(IToken(DAI_ADDRESS).transfer.selector, owner, _fee));
         _reward = sub(_reward, _fee);
         p.daiProfit = uint64(_reward / 1e12); // reduce decimals to 1e6
         profits.push(p);
