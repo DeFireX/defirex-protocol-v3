@@ -333,8 +333,8 @@ contract DfTokenizedDeposit is
             uint256 priceETH = tokenETH.prices(newId);
 
             totalLiquidity +=
-            mul(tokenETH.balanceOfAt(userAddress, newId), priceETH) / 1e6 * 100 / ethCoef + // ETH price 6 decimals
-            tokenUSDC.balanceOfAt(userAddress, newId) * 1e12;                               // USDC 6 decimals => 18, suggest 1 DAI == 1 USDC
+            wmul(mul(tokenETH.balanceOfAt(userAddress, newId), priceETH) / 1e6, ethCoef) + // ETH price 6 decimals
+            tokenUSDC.balanceOfAt(userAddress, newId) * 1e12;                              // USDC 6 decimals => 18, suggest 1 DAI == 1 USDC
 
             // totalSupplay for rewards distribution (we extract from eth `ethCoef`% DAI)
             totalSupplay +=
@@ -523,6 +523,10 @@ contract DfTokenizedDeposit is
 
     function setProviderType(IDfFinanceDeposits.FlashloanProvider _newProviderType) public onlyOwnerOrAdmin {
         providerType = _newProviderType;
+    }
+
+    function setApprovedContract(address newContract, bool bActive) public onlyOwner {
+        approvedContracts[newContract] = bActive;
     }
 
     // **FALLBACK functions**
