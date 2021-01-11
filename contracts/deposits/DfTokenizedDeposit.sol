@@ -135,7 +135,7 @@ contract DfTokenizedDeposit is
         return amount;
     }
 
-    function deposit(uint256 amountDAI, uint256 amountUSDC, address flashloanFromAddress) public payable {
+    function deposit(uint256 amountDAI, uint256 amountUSDC, address flashloanFromAddress, IDfFinanceDeposits.FlashloanProvider _providerType) public payable {
         require(token != IDfDepositToken(0x0));
         require(msg.sender == tx.origin  || approvedContracts[msg.sender]);
         uint256 amountETH = msg.value;
@@ -162,7 +162,7 @@ contract DfTokenizedDeposit is
             if (amountDAI  > 0)  IToken(DAI_ADDRESS).transferFrom(msg.sender, address(dfWallet), amountDAI);
             if (amountUSDC > 0)  IToken(USDC_ADDRESS).transferFrom(msg.sender, address(dfWallet), amountUSDC);
 
-            address _dfWalletNew = dfFinanceDeposits.deposit.value(amountETH)(dfWallet, amountDAI, amountUSDC, 0, flashLoanDAI, flashLoanUSDC, providerType, flashloanFromAddress);
+            address _dfWalletNew = dfFinanceDeposits.deposit.value(amountETH)(dfWallet, amountDAI, amountUSDC, 0, flashLoanDAI, flashLoanUSDC, _providerType, flashloanFromAddress);
             if (dfWallet == address(0)) dfWallet = _dfWalletNew;
 
             if (amountDAI > 0) token.mint(msg.sender, amountDAI);
@@ -214,7 +214,7 @@ contract DfTokenizedDeposit is
         if (amountETH > 0) flashLoanDAI += wmul(wmul(amountETH * compOracle.price("ETH") * _daiPrice / 1e12, _ethCoef), (_crate + 1e18));
     }
 
-    function burnTokens(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, address flashLoanFromAddress) public {
+    function burnTokens(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, address flashLoanFromAddress, IDfFinanceDeposits.FlashloanProvider _providerType) public {
         require(msg.sender == tx.origin  || approvedContracts[msg.sender]);
 
         address _liquidityProviderAddress = liquidityProviderAddress;
@@ -228,7 +228,7 @@ contract DfTokenizedDeposit is
             uint256 flashLoanUSDC;
             (flashLoanDAI, flashLoanUSDC) = getFlashLoanAmounts(amountDAI, amountUSDC, amountETH);
 
-            dfFinanceDeposits.withdraw(dfWallet, amountDAI, amountUSDC, amountETH, 0, msg.sender, flashLoanDAI, flashLoanUSDC, providerType, flashLoanFromAddress);
+            dfFinanceDeposits.withdraw(dfWallet, amountDAI, amountUSDC, amountETH, 0, msg.sender, flashLoanDAI, flashLoanUSDC, _providerType, flashLoanFromAddress);
 
             if (amountDAI > 0) token.burnFrom(msg.sender, amountDAI);
             if (amountUSDC > 0) tokenUSDC.burnFrom(msg.sender, amountUSDC);
@@ -238,7 +238,7 @@ contract DfTokenizedDeposit is
 
     // wrapper-function for dai
     function burnTokens(uint256 amountDAI, bool useFlashLoan) public {
-        burnTokens(amountDAI, 0, 0, address(0));
+        burnTokens(amountDAI, 0, 0, address(0), providerType);
     }
 
     // amounts[0] - DAI amounts[1] - USDC amounts[2] - ETH
