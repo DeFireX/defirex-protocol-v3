@@ -380,7 +380,7 @@ contract DfTokenizedDeposit is
         if (_totalDaiProfit > 0) {
             dfProfits.cast(address(uint160(DAI_ADDRESS)), abi.encodeWithSelector(IToken(DAI_ADDRESS).transfer.selector, _profitTo, _totalDaiProfit));
             if (_isReinvest) {
-                deposit(_totalDaiProfit, 0, address(0x0));
+                deposit(_totalDaiProfit, 0, address(0x0), providerType);
             }
         }
     }
