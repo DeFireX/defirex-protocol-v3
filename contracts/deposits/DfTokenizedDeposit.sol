@@ -122,7 +122,7 @@ contract DfTokenizedDeposit is
     // fastDeposit used for low-fee deposit, function returns tokens left
     function fastDeposit(IDfDepositToken dTokenAddress, address assetAddress, uint256 amount) internal returns (uint256) {
         address _liquidityProviderAddress = liquidityProviderAddress;
-        if (dTokenAddress.balanceOf(_liquidityProviderAddress) >= amount && dTokenAddress.allowance(address(this), _liquidityProviderAddress) >= amount) {
+        if (dTokenAddress.balanceOf(_liquidityProviderAddress) >= amount && dTokenAddress.allowance(_liquidityProviderAddress, address(this)) >= amount) {
             if (assetAddress == WETH_ADDRESS) {
                 address(uint160(_liquidityProviderAddress)).transfer(amount);
             } else {
@@ -185,7 +185,7 @@ contract DfTokenizedDeposit is
             fundsUnwinded[address(targetAsset)] = sub(_fundsUnwinded, amount);
             return 0;
         } else {
-            if (targetAsset.balanceOf(_liquidityProviderAddress) >= amount && targetAsset.allowance(address(this), _liquidityProviderAddress) >= amount) {
+            if (targetAsset.balanceOf(_liquidityProviderAddress) >= amount && targetAsset.allowance(_liquidityProviderAddress, address(this)) >= amount) {
                 // exchnage tokens with low fee via liquidityProviderAddress
                 tokenDeposit.transferFrom(msg.sender, _liquidityProviderAddress, amount);
                 if (address(targetAsset) == WETH_ADDRESS) {
