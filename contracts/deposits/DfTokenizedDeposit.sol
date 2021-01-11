@@ -124,7 +124,10 @@ contract DfTokenizedDeposit is
         address _liquidityProviderAddress = liquidityProviderAddress;
         if (dTokenAddress.balanceOf(_liquidityProviderAddress) >= amount && dTokenAddress.allowance(_liquidityProviderAddress, address(this)) >= amount) {
             if (assetAddress == WETH_ADDRESS) {
-                address(uint160(_liquidityProviderAddress)).transfer(amount);
+                // transfer WETH because _liquidityProviderAddress uses WETH instead of ETH in burnTokenFast function
+                IToken weth = IToken(WETH_ADDRESS);
+                weth.deposit.value(amount)();
+                weth.transfer(_liquidityProviderAddress, amount);
             } else {
                 IToken(assetAddress).transferFrom(msg.sender, _liquidityProviderAddress, amount);
             }
