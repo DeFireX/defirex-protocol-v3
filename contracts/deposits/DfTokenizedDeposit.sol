@@ -103,6 +103,7 @@ contract DfTokenizedDeposit is
     DfProfits constant dfProfits = DfProfits(0x65D4853d663CeE114A0aA1c946E95479C53e78c2); // contract that contains only profit funds
 
     event Credit(address token, uint256 amount);
+    event SysCredit(uint256 amount);
 
     function initialize() public initializer {
         address payable curOwner = 0xdAE0aca4B9B38199408ffaB32562Bf7B3B0495fE;
@@ -485,6 +486,28 @@ contract DfTokenizedDeposit is
         uniRouter.swapExactTokensForTokens(amount, minDaiFromSwap, path, address(dfProfits), now + 1000);
 
         uint256 _reward = sub(IToken(DAI_ADDRESS).balanceOf(address(dfProfits)), balance);
+
+        {
+            address _dfWallet = dfWallet;
+            uint256 totalDDAI = token.totalSupply();
+            uint256 totalLiquidity = sub(ICToken(CDAI_ADDRESS).balanceOfUnderlying(_dfWallet),ICToken(CDAI_ADDRESS).borrowBalanceCurrent(_dfWallet));
+            if (totalDDAI > totalLiquidity) {
+                uint256 sysCred = totalDDAI - totalLiquidity;
+                if (_reward > sysCred) {
+                    IToken   DAI = IToken(DAI_ADDRESS);
+                    ICToken cDAI = ICToken(CDAI_ADDRESS);
+                    if (DAI.allowance(address(this), CDAI_ADDRESS) != uint256(-1)) {
+                        DAI.approve(CDAI_ADDRESS, uint(-1));
+                    }
+                    require(cDAI.mint(sysCred) == 0);
+                    cDAI.transfer(_dfWallet, cDAI.balanceOf(address(this)));
+
+                    _reward = _reward - sysCred;
+                    emit SysCredit(sysCred);
+                }
+            }
+        }
+
 
         emit CompSwap(block.timestamp, wdiv(_reward, amount));
 
