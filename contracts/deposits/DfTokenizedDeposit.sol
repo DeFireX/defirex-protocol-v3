@@ -246,12 +246,12 @@ contract DfTokenizedDeposit is
     }
 
     // amounts[0] - DAI amounts[1] - USDC amounts[2] - ETH
-    function sync(address flashLoanFromAddress, uint256 _newCRate, uint256 _newEthCoef, uint256[3] memory amounts, bool check) onlyOwnerOrAdmin public returns (uint256 avgCRate, uint256 avgEthCoef, uint256 f)  {
+    function sync(IDfFinanceDeposits.FlashloanProvider _providerType, address flashLoanFromAddress, uint256 _newCRate, uint256 _newEthCoef, uint256[3] memory amounts, bool check) onlyOwnerOrAdmin public returns (uint256 avgCRate, uint256 avgEthCoef, uint256 f)  {
         IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
         uint256 _daiPrice = compOracle.price("DAI") * 1e12;
         uint256 _ethPrice = compOracle.price("ETH") * 1e12;
 
-        unwindFunds(amounts[0], amounts[1], amounts[2], flashLoanFromAddress);
+        unwindFunds(amounts[0], amounts[1], amounts[2], _providerType, flashLoanFromAddress);
 
         { // fix "stack too deep"
             uint256 amountTotalETH = tokenETH.totalSupply();
@@ -269,7 +269,7 @@ contract DfTokenizedDeposit is
             }
         }
 
-        boostFunds(amounts[0], amounts[1], amounts[2], flashLoanFromAddress);
+        boostFunds(amounts[0], amounts[1], amounts[2], _providerType, flashLoanFromAddress);
 
         if (avgCRate > 0) crate = avgCRate;
         if (avgEthCoef > 0) ethCoef = avgEthCoef;
@@ -279,17 +279,14 @@ contract DfTokenizedDeposit is
         }
     }
 
-    function unwindFunds(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, address flashLoanFromAddress) public onlyOwnerOrAdmin {
-        uint256 flashLoanDAI;
-        uint256 flashLoanUSDC;
-        (flashLoanDAI, flashLoanUSDC) = getFlashLoanAmounts(amountDAI, amountUSDC, amountETH);
+    function unwindFunds(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, IDfFinanceDeposits.FlashloanProvider _providerType, address flashLoanFromAddress) public onlyOwnerOrAdmin {
+        (uint256 flashLoanDAI, uint256 flashLoanUSDC) = getFlashLoanAmounts(amountDAI, amountUSDC, amountETH);
 
         uint256 balanceDAI;
         uint256 balanceUSDC;
         if (amountDAI > 0) balanceDAI = IToken(DAI_ADDRESS).balanceOf(address(this));
         if (amountUSDC > 0) balanceUSDC = IToken(USDC_ADDRESS).balanceOf(address(this));
-        // amountETH = -1
-        dfFinanceDeposits.withdraw(dfWallet, amountDAI, amountUSDC, amountETH, 0, address(this), flashLoanDAI, flashLoanUSDC, providerType, flashLoanFromAddress);
+        dfFinanceDeposits.withdraw(dfWallet, amountDAI, amountUSDC, amountETH, 0, address(this), flashLoanDAI, flashLoanUSDC, _providerType, flashLoanFromAddress);
 
         if (amountDAI > 0) {
             balanceDAI = sub(IToken(DAI_ADDRESS).balanceOf(address(this)), balanceDAI);
@@ -308,7 +305,7 @@ contract DfTokenizedDeposit is
 
     }
 
-    function boostFunds(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, address flashLoanFromAddress) public onlyOwnerOrAdmin  {
+    function boostFunds(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, IDfFinanceDeposits.FlashloanProvider _providerType, address flashLoanFromAddress) public onlyOwnerOrAdmin  {
         if (amountDAI > fundsUnwinded[DAI_ADDRESS]) amountDAI = fundsUnwinded[DAI_ADDRESS];
         if (amountUSDC > fundsUnwinded[USDC_ADDRESS]) amountUSDC = fundsUnwinded[USDC_ADDRESS];
         if (amountETH > fundsUnwinded[WETH_ADDRESS]) amountETH = fundsUnwinded[WETH_ADDRESS];
@@ -318,7 +315,7 @@ contract DfTokenizedDeposit is
         (flashLoanDAI, flashLoanUSDC) = getFlashLoanAmounts(amountDAI, amountUSDC, amountETH);
         if (amountDAI  > 0)  IToken(DAI_ADDRESS).transfer(address(dfWallet), amountDAI);
         if (amountUSDC > 0)  IToken(USDC_ADDRESS).transfer(address(dfWallet), amountUSDC);
-        dfFinanceDeposits.deposit.value(amountETH)(dfWallet, amountDAI, amountUSDC, 0, flashLoanDAI, flashLoanUSDC, providerType, flashLoanFromAddress);
+        dfFinanceDeposits.deposit.value(amountETH)(dfWallet, amountDAI, amountUSDC, 0, flashLoanDAI, flashLoanUSDC, _providerType, flashLoanFromAddress);
         if (amountDAI > 0) fundsUnwinded[DAI_ADDRESS] = sub(fundsUnwinded[DAI_ADDRESS], amountDAI);
         if (amountUSDC > 0) fundsUnwinded[USDC_ADDRESS] = sub(fundsUnwinded[USDC_ADDRESS], amountUSDC);
         if (amountETH > 0) fundsUnwinded[WETH_ADDRESS] = sub(fundsUnwinded[WETH_ADDRESS], amountETH);
@@ -500,7 +497,7 @@ contract DfTokenizedDeposit is
                         DAI.approve(CDAI_ADDRESS, uint(-1));
                     }
                     require(cDAI.mint(sysCred) == 0);
-                    cDAI.transfer(_dfWallet, cDAI.balanceOf(address(this)));
+                    IToken(CDAI_ADDRESS).transfer(_dfWallet, cDAI.balanceOf(address(this)));
 
                     _reward = _reward - sysCred;
                     emit SysCredit(sysCred);
