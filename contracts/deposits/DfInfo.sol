@@ -94,6 +94,42 @@ contract DfInfo is ConstantAddresses {
         tokenBalances[1] = dfTokenizedDepositAddress.tokenUSDC().totalSupply();
         tokenBalances[2] = dfTokenizedDepositAddress.tokenETH().totalSupply();
 
-        f = (cred * 100) / land;
+        f = (cred * 100 * 1000) / land;
+    }
+
+    function getCRate(IDfTokenizedDeposit dfTokenizedDepositAddress)
+    public
+    returns (uint256 f)
+    {
+        address walletAddress = dfTokenizedDepositAddress.dfWallet();
+
+        IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
+
+        uint256 daiPrice = compOracle.price("DAI");
+        uint256 usdcPrice = compOracle.price("USDC");
+        uint256 ethPrice = compOracle.price("ETH");
+
+        land =
+        (ICToken(CDAI_ADDRESS).balanceOfUnderlying(walletAddress) * daiPrice) /
+        10**6 +
+        (ICToken(CUSDC_ADDRESS).balanceOfUnderlying(walletAddress) * usdcPrice) /
+        10**6 +
+        (ICToken(CETH_ADDRESS).balanceOfUnderlying(walletAddress) * ethPrice) /
+        10**6;
+
+        cred +=
+        (ICToken(CDAI_ADDRESS).borrowBalanceCurrent(walletAddress) *
+        daiPrice) /
+        10**6;
+        cred +=
+        (ICToken(CUSDC_ADDRESS).borrowBalanceCurrent(walletAddress) *
+        usdcPrice) /
+        10**6;
+        cred +=
+        (ICToken(CETH_ADDRESS).borrowBalanceCurrent(walletAddress) *
+        ethPrice) /
+        10**6;
+
+        f = (cred * 100 * 1000) / land;
     }
 }
