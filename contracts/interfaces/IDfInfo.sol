@@ -13,4 +13,6 @@ interface IDfInfo {
             uint256[3] memory unwindedBalances,
             uint256[3] memory tokenBalances
         );
+
+    function getCRate(address dfTokenizedDepositAddress) public returns (uint256 f);
 }
