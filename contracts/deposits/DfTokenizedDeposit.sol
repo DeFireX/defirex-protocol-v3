@@ -107,15 +107,28 @@ contract DfTokenizedDeposit is
 
     uint256 public totalDaiLoanForEth;
 
+    uint256 public aaveFee;
+
+    uint256 public minCRate;
+
     function initialize() public initializer {
         address payable curOwner = 0xdAE0aca4B9B38199408ffaB32562Bf7B3B0495fE;
         Adminable.initialize(curOwner);  // Initialize Parent Contract
 
         IToken(DAI_ADDRESS).approve(address(dfFinanceDeposits), uint256(-1));
     }
-    function setupTotalDaiLoanForEthOnce(uint256 newValue) public onlyOwner {
+    function setupOnce(uint256 newValue) public onlyOwner {
         require(totalDaiLoanForEth == 0);
         totalDaiLoanForEth = newValue;
+        aaveFee = 1e18 * 9 / 100;
+    }
+
+    function setAaveFee(uint256 _newFee) public onlyOwner {
+        aaveFee = _newFee;
+    }
+
+    function setMinCRate(uint256 _newCRate) public onlyOwner {
+        minCRate = _newCRate;
     }
 
     function migrateToV2Once() public {
@@ -147,7 +160,7 @@ contract DfTokenizedDeposit is
     }
 
     // amounts[0] - DAI, amounts[1] - USDC, amounts[2] - ETH
-    function deposit(uint256[] memory amounts, address flashloanFromAddress, IDfFinanceDeposits.FlashloanProvider _providerType) public payable {
+    function deposit(uint256[] memory amounts, address flashloanFromAddress, IDfFinanceDeposits.FlashloanProvider _providerType) public payable returns (uint256[] memory) {
         require(msg.sender == tx.origin  || approvedContracts[msg.sender]);
         amounts[2] = msg.value;
 
@@ -169,41 +182,55 @@ contract DfTokenizedDeposit is
             (flashLoanDAI, flashLoanUSDC, daiLoanForEth) = getFlashLoanAmounts(amounts[0], amounts[1], amounts[2], true);
 
             // [0] - daiLiquidity, [1] - usdcLiquidity
-            uint256 [] memory liquidity = new uint256[](2);
-            if (_providerType == IDfFinanceDeposits.FlashloanProvider.AAVE) {
-                if (flashLoanDAI > 0) {
-                    liquidity[0] = ICToken(CDAI_ADDRESS).balanceOfUnderlying(dfWallet);
-                }
-                if (flashLoanUSDC > 0) {
-                    liquidity[1] = ICToken(CUSDC_ADDRESS).balanceOfUnderlying(dfWallet);
-                }
-            }
+//            uint256 [] memory liquidity = new uint256[](2);
+//            if (_providerType == IDfFinanceDeposits.FlashloanProvider.AAVE) {
+//                if (flashLoanDAI > 0) {
+//                    liquidity[0] = ICToken(CDAI_ADDRESS).balanceOfUnderlying(dfWallet);
+//                }
+//                if (flashLoanUSDC > 0) {
+//                    liquidity[1] = ICToken(CUSDC_ADDRESS).balanceOfUnderlying(dfWallet);
+//                }
+//            }
 
             if (amounts[0] > 0) IToken(DAI_ADDRESS).transferFrom(msg.sender, address(dfWallet), amounts[0]);
             if (amounts[1] > 0) IToken(USDC_ADDRESS).transferFrom(msg.sender, address(dfWallet), amounts[1]);
 
             dfFinanceDeposits.deposit.value(amounts[2])(dfWallet, amounts[0], amounts[1], 0, flashLoanDAI, flashLoanUSDC, _providerType, flashloanFromAddress);
-
+            require( isSafe() );
+//            if (_providerType == IDfFinanceDeposits.FlashloanProvider.AAVE) {
+//                if (flashLoanDAI > 0) {
+//                    uint256 currentLiquidityAfterFee = sub(ICToken(CDAI_ADDRESS).balanceOfUnderlying(dfWallet), amounts[0]);
+//                    if (liquidity[0] > currentLiquidityAfterFee) {
+//                        uint256 daiAaveFee = liquidity[0] - currentLiquidityAfterFee;
+//                        if (amounts[0] > daiAaveFee) {
+//                            amounts[0] -= daiAaveFee;
+//                        } else {
+//                            IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
+//                            uint256 feeInEth = daiAaveFee * 1e12 / compOracle.price("ETH") / compOracle.price("DAI");
+//                            amounts[2] = sub(amounts[2], feeInEth);
+//                        }
+//                    }
+//                }
+//                if (flashLoanUSDC > 0) {
+//                    uint256 currentLiquidityAfterFee = sub(ICToken(CUSDC_ADDRESS).balanceOfUnderlying(dfWallet), amounts[1]);
+//                    if (liquidity[1] > currentLiquidityAfterFee) {
+//                        amounts[1] = sub(amounts[1], liquidity[1] - currentLiquidityAfterFee);
+//                    }
+//
+//                }
+//            }
             if (_providerType == IDfFinanceDeposits.FlashloanProvider.AAVE) {
                 if (flashLoanDAI > 0) {
-                    uint256 currentLiquidityAfterFee = sub(ICToken(CDAI_ADDRESS).balanceOfUnderlying(dfWallet), amounts[0]);
-                    if (liquidity[0] > currentLiquidityAfterFee) {
-                        uint256 daiAaveFee = liquidity[0] - currentLiquidityAfterFee;
-                        if (amounts[0] > daiAaveFee) {
-                            amounts[0] -= daiAaveFee;
-                        } else {
-                            IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
-                            uint256 feeInEth = daiAaveFee * 1e12 / compOracle.price("ETH") / compOracle.price("DAI");
-                            amounts[2] = sub(amounts[2], feeInEth);
-                        }
+                    uint256 fee = wmul(flashLoanDAI, aaveFee);
+                    if (amounts[0] > fee) {
+                        amounts[0] -= fee;
+                    } else {
+                        amounts[2] = sub(amounts[2], wdiv(fee, getEthPrice()))
                     }
                 }
                 if (flashLoanUSDC > 0) {
-                    uint256 currentLiquidityAfterFee = sub(ICToken(CUSDC_ADDRESS).balanceOfUnderlying(dfWallet), amounts[1]);
-                    if (liquidity[1] > currentLiquidityAfterFee) {
-                        amounts[1] = sub(amounts[1], liquidity[1] - currentLiquidityAfterFee);
-                    }
-
+                    uint256 fee = wmul(flashLoanUSDC, aaveFee);
+                    amounts[1] = sub(amounts[1], fee);
                 }
             }
 
@@ -214,6 +241,7 @@ contract DfTokenizedDeposit is
             uint256 totalDETH = sub(tokenETH.totalSupply(), amounts[2]);
             totalDaiLoanForEth = wdiv(add(wmul(totalDaiLoanForEth,totalDETH), daiLoanForEth), add(totalDETH, amounts[2]));
         }
+        return amounts;
     }
 
     function burnTokenFast(IDfDepositToken tokenDeposit, IToken targetAsset, uint256 amount, address _liquidityProviderAddress) internal returns (uint256) {
@@ -267,6 +295,10 @@ contract DfTokenizedDeposit is
         }
     }
 
+    function isSafe() view public returns (bool){
+        return (minCRate < 75 * 1000) ? dfInfo.getCRate(address(this)) < minCRate : true;
+    }
+
     function burnTokens(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, address flashLoanFromAddress, IDfFinanceDeposits.FlashloanProvider _providerType) public {
         require(msg.sender == tx.origin  || approvedContracts[msg.sender]);
 
@@ -281,13 +313,27 @@ contract DfTokenizedDeposit is
             uint256 flashLoanUSDC;
             (flashLoanDAI, flashLoanUSDC,) = getFlashLoanAmounts(amountDAI, amountUSDC, amountETH, false);
 
+            if (_providerType == IDfFinanceDeposits.FlashloanProvider.AAVE) {
+                if (flashLoanDAI > 0) {
+                    uint256 fee = wmul(flashLoanDAI, aaveFee);
+                    if (amountDAI > fee) {
+                        amountDAI -= fee;
+                    } else {
+                        amountETH = sub(amountETH, wdiv(fee, getEthPrice()))
+                    }
+                }
+                if (flashLoanUSDC > 0) {
+                    uint256 fee = wmul(flashLoanUSDC, aaveFee);
+                    amountUSDC = sub(amountUSDC, fee);
+                }
+            }
+
             dfFinanceDeposits.withdraw(dfWallet, amountDAI, amountUSDC, amountETH, 0, msg.sender, flashLoanDAI, flashLoanUSDC, _providerType, flashLoanFromAddress);
+            require( isSafe() );
 
             if (amountDAI > 0) token.burnFrom(msg.sender, amountDAI);
             if (amountUSDC > 0) tokenUSDC.burnFrom(msg.sender, amountUSDC);
             if (amountETH > 0) tokenETH.burnFrom(msg.sender, amountETH);
-
-            // TODO: check CRATE
         }
     }
 
@@ -378,7 +424,7 @@ contract DfTokenizedDeposit is
 
     uint256 constant snapshotOffset = 73; // offset for new tokens
 
-    function userShare(address userAddress, uint256 snapshotId) view public returns (uint256 totalLiquidity, uint256 totalSupplay) {
+    function userShare(address userAddress, uint256 snapshotId) view public returns (uint256 totalLiquidity, uint256 totalSupplay, uint256 totalETHLiquidity, uint256 totalUSDCLiquidity) {
         if (snapshotId == uint256(-1)) snapshotId = profits.length;
 
         totalLiquidity = token.balanceOfAt(userAddress, snapshotId);
@@ -388,9 +434,10 @@ contract DfTokenizedDeposit is
             uint256 newId = snapshotId - snapshotOffset;
             uint256 priceETH = tokenETH.prices(newId);
 
-            totalLiquidity +=
-            wmul(mul(tokenETH.balanceOfAt(userAddress, newId), priceETH) / 1e6, ethCoef) + // ETH price 6 decimals
-            tokenUSDC.balanceOfAt(userAddress, newId) * 1e12;                              // USDC 6 decimals => 18, suggest 1 DAI == 1 USDC
+            totalETHLiquidity = wmul(mul(tokenETH.balanceOfAt(userAddress, newId), priceETH) / 1e6, ethCoef); // ETH price 6 decimals
+            totalUSDCLiquidity = tokenUSDC.balanceOfAt(userAddress, newId) * 1e12; // USDC 6 decimals => 18, suggest 1 DAI == 1 USDC
+
+            totalLiquidity += totalETHLiquidity + totalUSDCLiquidity;
 
             // totalSupplay for rewards distribution (we extract from eth `ethCoef`% DAI)
             totalSupplay +=
@@ -410,7 +457,7 @@ contract DfTokenizedDeposit is
             ProfitData memory p = profits[index];
             uint256 balanceAtBlock;
             uint256 totalSupplyAt;
-            (balanceAtBlock, totalSupplyAt) = userShare(userAddress, index + 1);
+            (balanceAtBlock, totalSupplyAt,,) = userShare(userAddress, index + 1);
 
             uint256 profitUsdt = wdiv(wmul(uint256(p.usdtProfit), balanceAtBlock), totalSupplyAt);
             uint256 profitDai = wdiv(wmul(mul(uint256(p.daiProfit), 1e12),balanceAtBlock), totalSupplyAt);
@@ -510,7 +557,11 @@ contract DfTokenizedDeposit is
     function getCompPriceInDAI() view public returns(uint256) {
         //  price not less that price from oracle with 5% slippage
         IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
-        return compOracle.price("COMP") * 1e18 / compOracle.price("DAI") * 95 / 100;
+        return compOracle.price("COMP") * 1e18 / compOracle.price("DAI") * 95 / 100; // 6 + 18 - 6 = 18
+    }
+    function getEthPrice() view public returns(uint256) {
+        IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
+        return compOracle.price("ETH") * 1e12; // 6 + 12 = 18
     }
 
     // profit in DAI
