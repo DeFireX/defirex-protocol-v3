@@ -111,6 +111,8 @@ contract DfTokenizedDeposit is
 
     uint256 public minCRate;
 
+    mapping(uint256 => uint256) ethCoefSnapshoted;
+
     function initialize() public initializer {
         address payable curOwner = 0xdAE0aca4B9B38199408ffaB32562Bf7B3B0495fE;
         Adminable.initialize(curOwner);  // Initialize Parent Contract
@@ -434,14 +436,18 @@ contract DfTokenizedDeposit is
             uint256 newId = snapshotId - snapshotOffset;
             uint256 priceETH = tokenETH.prices(newId);
 
-            totalETHLiquidity = wmul(mul(tokenETH.balanceOfAt(userAddress, newId), priceETH) / 1e6, ethCoef); // ETH price 6 decimals
+            uint256 _ethCoef = ethCoefSnapshoted[snapshotId];
+            if (_ethCoef == 0) _ethCoef = ethCoef;
+            require(_ethCoef < 1e18);
+
+            totalETHLiquidity = wmul(mul(tokenETH.balanceOfAt(userAddress, newId), priceETH) / 1e6, _ethCoef); // ETH price 6 decimals
             totalUSDCLiquidity = tokenUSDC.balanceOfAt(userAddress, newId) * 1e12; // USDC 6 decimals => 18, suggest 1 DAI == 1 USDC
 
             totalLiquidity += totalETHLiquidity + totalUSDCLiquidity;
 
             // totalSupplay for rewards distribution (we extract from eth `ethCoef`% DAI)
             totalSupplay +=
-            wmul(mul(tokenETH.totalSupplyAt(newId), priceETH) / 1e6, ethCoef) +  // ETH price 6 decimals
+            wmul(mul(tokenETH.totalSupplyAt(newId), priceETH) / 1e6, _ethCoef) +  // ETH price 6 decimals
             tokenUSDC.totalSupplyAt(newId) * 1e12;                               // USDC 6 decimals => 18
         }
     }
@@ -628,6 +634,7 @@ contract DfTokenizedDeposit is
         if (address(tokenETH) != address(0x0)) tokenETH.snapshot(compOracle.price("ETH"));
         if (address(tokenUSDC) != address(0x0)) tokenUSDC.snapshot();
 
+        ethCoefSnapshoted[profits.length - 1] = ethCoef;
         lastFixProfit = now;
         return p.daiProfit;
     }
