@@ -438,7 +438,7 @@ contract DfTokenizedDeposit is
 
             uint256 _ethCoef = ethCoefSnapshoted[snapshotId];
             if (_ethCoef == 0) _ethCoef = ethCoef;
-            require(_ethCoef < 1e18);
+            require(_ethCoef < 1e18); // less then 100%
 
             totalETHLiquidity = wmul(mul(tokenETH.balanceOfAt(userAddress, newId), priceETH) / 1e6, _ethCoef); // ETH price 6 decimals
             totalUSDCLiquidity = tokenUSDC.balanceOfAt(userAddress, newId) * 1e12; // USDC 6 decimals => 18, suggest 1 DAI == 1 USDC
@@ -460,15 +460,19 @@ contract DfTokenizedDeposit is
         index = fromIndex;
 
         for(; index < max; index++) {
-            ProfitData memory p = profits[index];
+
             uint256 balanceAtBlock;
             uint256 totalSupplyAt;
             (balanceAtBlock, totalSupplyAt,,) = userShare(userAddress, index + 1);
 
-            uint256 profitUsdt = wdiv(wmul(uint256(p.usdtProfit), balanceAtBlock), totalSupplyAt);
-            uint256 profitDai = wdiv(wmul(mul(uint256(p.daiProfit), 1e12),balanceAtBlock), totalSupplyAt);
-            totalUsdtProfit = add(totalUsdtProfit, profitUsdt);
-            totalDaiProfit = add(totalDaiProfit, profitDai);
+            if (balanceAtBlock > 0)
+            {
+                ProfitData memory p = profits[index];
+                uint256 profitUsdt = wdiv(wmul(uint256(p.usdtProfit), balanceAtBlock), totalSupplyAt);
+                uint256 profitDai = wdiv(wmul(mul(uint256(p.daiProfit), 1e12),balanceAtBlock), totalSupplyAt);
+                totalUsdtProfit = add(totalUsdtProfit, profitUsdt);
+                totalDaiProfit = add(totalDaiProfit, profitDai);
+            }
         }
     }
 
