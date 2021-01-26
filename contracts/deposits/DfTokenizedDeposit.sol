@@ -122,7 +122,7 @@ contract DfTokenizedDeposit is
     function setupOnce(uint256 newValue) public onlyOwner {
         require(totalDaiLoanForEth == 0);
         totalDaiLoanForEth = newValue;
-        aaveFee = 1e18 * 9 / 100;
+        aaveFee = 1e18 * 9 / 100 / 100; // 0.09% * 1e18
     }
 
     function setAaveFee(uint256 _newFee) public onlyOwner {
@@ -130,6 +130,8 @@ contract DfTokenizedDeposit is
     }
 
     function setMinCRate(uint256 _newCRate) public onlyOwner {
+        uint256 currentCRate = dfInfo.getCRate(address(this));
+        require(_newCRate > currentCRate);
         minCRate = _newCRate;
     }
 
@@ -166,9 +168,6 @@ contract DfTokenizedDeposit is
         require(msg.sender == tx.origin  || approvedContracts[msg.sender]);
         amounts[2] = msg.value;
 
-        // when dfWallet is 0, first user should deposit eth
-        // require(dfWallet != address(0) || (amountETH > 0 && amountUSDC == 0 && amountDAI == 0));
-
         // fast deposit
         if (amounts[0] > 0) amounts[0] = fastDeposit(token, DAI_ADDRESS, amounts[0]);
 
@@ -183,44 +182,12 @@ contract DfTokenizedDeposit is
             uint256 daiLoanForEth; // flash loan for 1 ETH
             (flashLoanDAI, flashLoanUSDC, daiLoanForEth) = getFlashLoanAmounts(amounts[0], amounts[1], amounts[2], true);
 
-            // [0] - daiLiquidity, [1] - usdcLiquidity
-//            uint256 [] memory liquidity = new uint256[](2);
-//            if (_providerType == IDfFinanceDeposits.FlashloanProvider.AAVE) {
-//                if (flashLoanDAI > 0) {
-//                    liquidity[0] = ICToken(CDAI_ADDRESS).balanceOfUnderlying(dfWallet);
-//                }
-//                if (flashLoanUSDC > 0) {
-//                    liquidity[1] = ICToken(CUSDC_ADDRESS).balanceOfUnderlying(dfWallet);
-//                }
-//            }
-
             if (amounts[0] > 0) IToken(DAI_ADDRESS).transferFrom(msg.sender, address(dfWallet), amounts[0]);
             if (amounts[1] > 0) IToken(USDC_ADDRESS).transferFrom(msg.sender, address(dfWallet), amounts[1]);
 
             dfFinanceDeposits.deposit.value(amounts[2])(dfWallet, amounts[0], amounts[1], 0, flashLoanDAI, flashLoanUSDC, _providerType, flashloanFromAddress);
             require( isSafe() );
-//            if (_providerType == IDfFinanceDeposits.FlashloanProvider.AAVE) {
-//                if (flashLoanDAI > 0) {
-//                    uint256 currentLiquidityAfterFee = sub(ICToken(CDAI_ADDRESS).balanceOfUnderlying(dfWallet), amounts[0]);
-//                    if (liquidity[0] > currentLiquidityAfterFee) {
-//                        uint256 daiAaveFee = liquidity[0] - currentLiquidityAfterFee;
-//                        if (amounts[0] > daiAaveFee) {
-//                            amounts[0] -= daiAaveFee;
-//                        } else {
-//                            IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
-//                            uint256 feeInEth = daiAaveFee * 1e12 / compOracle.price("ETH") / compOracle.price("DAI");
-//                            amounts[2] = sub(amounts[2], feeInEth);
-//                        }
-//                    }
-//                }
-//                if (flashLoanUSDC > 0) {
-//                    uint256 currentLiquidityAfterFee = sub(ICToken(CUSDC_ADDRESS).balanceOfUnderlying(dfWallet), amounts[1]);
-//                    if (liquidity[1] > currentLiquidityAfterFee) {
-//                        amounts[1] = sub(amounts[1], liquidity[1] - currentLiquidityAfterFee);
-//                    }
-//
-//                }
-//            }
+
             if (_providerType == IDfFinanceDeposits.FlashloanProvider.AAVE) {
                 if (flashLoanDAI > 0) {
                     uint256 fee = wmul(flashLoanDAI, aaveFee);
@@ -299,6 +266,10 @@ contract DfTokenizedDeposit is
 
     function isSafe() view public returns (bool){
         return (minCRate < 75 * 1000) ? dfInfo.getCRate(address(this)) < minCRate : true;
+    }
+
+    function burnTokens(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, address flashLoanFromAddress) public {
+        burnTokens(amountDAI, amountUSDC, amountETH, flashLoanFromAddress, IDfFinanceDeposits.FlashloanProvider.DYDX);
     }
 
     function burnTokens(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, address flashLoanFromAddress, IDfFinanceDeposits.FlashloanProvider _providerType) public {
