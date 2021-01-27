@@ -121,8 +121,9 @@ contract DfTokenizedDeposit is
     }
     function setupOnce(uint256 newValue) public onlyOwner {
         require(totalDaiLoanForEth == 0);
-        totalDaiLoanForEth = newValue;
+        totalDaiLoanForEth = 2393596001536157700000; // 2393$ with 0.5 coef, avg eth price = 2393 / 2 = 1196,5
         aaveFee = 1e18 * 9 / 100 / 100; // 0.09% * 1e18
+        minCRate = 74800; // 74.8%
     }
 
     function setAaveFee(uint256 _newFee) public onlyOwner {
@@ -401,7 +402,6 @@ contract DfTokenizedDeposit is
         if (snapshotId == uint256(-1)) snapshotId = profits.length;
 
         totalLiquidity = token.balanceOfAt(userAddress, snapshotId);
-        totalSupplay = token.totalSupplyAt(snapshotId);
 
         if (snapshotId > snapshotOffset) {
             uint256 newId = snapshotId - snapshotOffset;
@@ -416,10 +416,18 @@ contract DfTokenizedDeposit is
 
             totalLiquidity += totalETHLiquidity + totalUSDCLiquidity;
 
-            // totalSupplay for rewards distribution (we extract from eth `ethCoef`% DAI)
-            totalSupplay +=
-            wmul(mul(tokenETH.totalSupplyAt(newId), priceETH) / 1e6, _ethCoef) +  // ETH price 6 decimals
-            tokenUSDC.totalSupplyAt(newId) * 1e12;                               // USDC 6 decimals => 18
+            // optimize: calc totalSupplay only when total user liquidity > 0
+            if (totalLiquidity > 0) {
+                // totalSupplay for rewards distribution (we extract from eth `ethCoef`% DAI)
+                totalSupplay +=
+                wmul(mul(tokenETH.totalSupplyAt(newId), priceETH) / 1e6, _ethCoef) + // ETH price 6 decimals
+                tokenUSDC.totalSupplyAt(newId) * 1e12;                               // USDC 6 decimals => 18
+            }
+        }
+
+        // optimize: calc totalSupplay only when total user liquidity > 0
+        if (totalLiquidity > 0) {
+            totalSupplay += token.totalSupplyAt(snapshotId);
         }
     }
 
