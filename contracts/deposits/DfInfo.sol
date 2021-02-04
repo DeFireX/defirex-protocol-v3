@@ -2,23 +2,10 @@ pragma solidity ^0.5.16;
 
 import "../constants/ConstantAddressesMainnet.sol";
 
-import "../interfaces/IPriceOracle.sol";
 import "../interfaces/IERC20.sol";
 import "../interfaces/IDfTokenizedDeposit.sol";
 import "../compound/interfaces/ICToken.sol";
-
-interface IComptroller {
-    function oracle() external view returns (IPriceOracle);
-
-    function getAccountLiquidity(address)
-        external
-        view
-        returns (
-            uint256,
-            uint256,
-            uint256
-        );
-}
+import "../interfaces/IComptroller.sol";
 
 contract DfInfo is ConstantAddresses {
     function getInfo(IDfTokenizedDeposit dfTokenizedDepositAddress)
