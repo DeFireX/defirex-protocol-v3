@@ -10,5 +10,8 @@
     "@openzeppelin/upgrades": "^2.8.0",
     "truffle": "^5.1.44",
     "truffle-flattener": "^1.4.4"
+  },
+  "devDependencies": {
+    "truffle-contract-size": "^2.0.1"
   }
 }
