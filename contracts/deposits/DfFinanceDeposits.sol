@@ -15,13 +15,14 @@ import "../flashloan/base/FlashLoanReceiverBase.sol";
 import "../dydxFlashloan/FlashloanDyDx.sol";
 
 // **INTERFACES**
-import "../compound/interfaces/IComptroller.sol";
 import "../compound/interfaces/ICToken.sol";
 import "../flashloan/interfaces/ILendingPool.sol";
 import "../interfaces/IDfWalletFactory.sol";
 import "../interfaces/IDfWallet.sol";
 import "../interfaces/IToken.sol";
 import "../interfaces/IComptrollerLensInterface.sol";
+import "../interfaces/IComptroller.sol";
+import "../interfaces/IWeth.sol";
 
 
 contract DfFinanceDeposits is
@@ -67,13 +68,23 @@ contract DfFinanceDeposits is
         uint256 amountFlashLoan;
     }
 
+    struct FlashloanDataDyDxEth {
+        address dfWallet;
+        address token;
+        address cToken;
+        uint256 deposit;
+        uint256 debt;
+        uint256 ethAmountFlashLoan;
+    }
 
     // ** ENUMS **
 
     enum OP {
         UNKNOWN,
         DEPOSIT,
-        WITHDRAW
+        WITHDRAW,
+        DEPOSIT_USING_DYDX_ETH,
+        WITHDRAW_USING_DYDX_ETH
     }
 
     enum FlashloanProvider {
@@ -195,16 +206,32 @@ contract DfFinanceDeposits is
 
         // Boost USDC deposit
         if (amountUSDC > 0 || flashloanUSDC > 0) {
-            _depositBoost(
-                dfWallet, USDC_ADDRESS, CUSDC_ADDRESS, amountUSDC, flashloanUSDC, flashloanType, flashloanFromAddress
-            ); 
+            if (flashloanType == FlashloanProvider.DYDX
+                && flashloanUSDC > IToken(USDC_ADDRESS).balanceOf(SOLO_MARGIN_ADDRESS)
+            ) {
+                _depositBoostUsingDyDxEth(
+                    dfWallet, USDC_ADDRESS, CUSDC_ADDRESS, amountUSDC, flashloanUSDC
+                );
+            } else {
+                _depositBoost(
+                    dfWallet, USDC_ADDRESS, CUSDC_ADDRESS, amountUSDC, flashloanUSDC, flashloanType, flashloanFromAddress
+                );
+            }
         }
 
         // Boost DAI deposit
         if (amountDAI > 0 || flashloanDAI > 0) {
-            _depositBoost(
-                dfWallet, DAI_ADDRESS, CDAI_ADDRESS, amountDAI, flashloanDAI, flashloanType, flashloanFromAddress
-            ); 
+            if (flashloanType == FlashloanProvider.DYDX
+                && flashloanDAI > IToken(DAI_ADDRESS).balanceOf(SOLO_MARGIN_ADDRESS)
+            ) {
+                _depositBoostUsingDyDxEth(
+                    dfWallet, DAI_ADDRESS, CDAI_ADDRESS, amountDAI, flashloanDAI
+                );
+            } else {
+                _depositBoost(
+                    dfWallet, DAI_ADDRESS, CDAI_ADDRESS, amountDAI, flashloanDAI, flashloanType, flashloanFromAddress
+                );
+            }
         }
 
         return dfWallet;
@@ -340,6 +367,38 @@ contract DfFinanceDeposits is
         // END FLASHLOAN LOGIC
     }
 
+    function _depositBoostUsingDyDxEth(
+        address dfWallet,
+        address token,
+        address cToken,
+        uint256 deposit,
+        uint256 flashloanInTokens
+    ) internal {
+        // FLASHLOAN LOGIC
+        state = OP.DEPOSIT_USING_DYDX_ETH;
+
+        IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
+        uint256 ethPrice = compOracle.price("ETH").mul(1e12); // with 1e18 (1e6 * 1e12)
+
+        uint256 ethDecimals = 18;
+        uint256 decimalsMultiplier = 10 ** ethDecimals.sub(IToken(token).decimals());
+
+        // IMPORTANT: token price is equal to 1 USD
+        uint256 flashloanEthAmount = wdiv(flashloanInTokens * decimalsMultiplier, ethPrice).mul(2); // use x2 coef for eth as collateral
+
+        _initFlashloanDyDx(
+            WETH_ADDRESS,
+            flashloanEthAmount,
+            // Encode FlashloanDataDyDxEth for callFunction
+            abi.encode(FlashloanDataDyDxEth({
+                dfWallet: dfWallet, token: token, cToken: cToken, deposit: deposit, debt: flashloanInTokens, ethAmountFlashLoan: flashloanEthAmount
+            }))
+        );
+
+        state = OP.UNKNOWN;
+        // END FLASHLOAN LOGIC
+    }
+
     function _withdrawBoostedAsset(
         address dfWallet,
         address token,
@@ -452,9 +511,10 @@ contract DfFinanceDeposits is
         uint fee
     ) internal {
         require(state != OP.UNKNOWN);
-        FlashloanData memory flashloanData = abi.decode(data, (FlashloanData));
 
         if (state == OP.DEPOSIT) {
+            FlashloanData memory flashloanData = abi.decode(data, (FlashloanData));
+
             // Calculate repay amount
             uint totalDebt = add(flashloanData.amountFlashLoan, fee);
 
@@ -466,11 +526,48 @@ contract DfFinanceDeposits is
 
             IDfWallet(flashloanData.dfWallet).withdrawToken(flashloanData.token, address(this), totalDebt);
         } else if (state == OP.WITHDRAW) {
+            FlashloanData memory flashloanData = abi.decode(data, (FlashloanData));
+
+            // _withdrawBoost() subtracts flashloan fee
             // Compound Quick Maths – redeemAmountIn * 1e18 * 1e18 / exchangeRateCurrent / 1e18
             uint cTokenToExtract = (flashloanData.deposit != uint(-1)) ? flashloanData.deposit.add(flashloanData.amountFlashLoan).mul(1e36).div(ICToken(flashloanData.cToken).exchangeRateCurrent()).div(1e18) : uint(-1);
 
             IDfWallet(flashloanData.dfWallet).withdraw(flashloanData.token, flashloanData.cToken, cTokenToExtract, flashloanData.token, flashloanData.cToken, flashloanData.amountFlashLoan);
             // require(flashloanData.amountFlashLoan.div(3) >= sub(receivedAmount, _fee), "Fee greater then user amount"); // user pay fee for flash loan
+        } else if (state == OP.DEPOSIT_USING_DYDX_ETH) {
+            // use dYdX flashloans without fee
+            FlashloanDataDyDxEth memory flashloanData = abi.decode(data, (FlashloanDataDyDxEth));
+            uint256 loanEth = flashloanData.ethAmountFlashLoan;
+
+            // WETH to ETH for loan
+            IWeth(WETH_ADDRESS).withdraw(loanEth);
+
+            // deposit eth loan and borrow debt tokens
+            IDfWallet(flashloanData.dfWallet).deposit.value(loanEth)(
+                ETH_ADDRESS, CETH_ADDRESS, loanEth, flashloanData.token, flashloanData.cToken, flashloanData.debt
+            );
+
+            // deposit user deposit + debt tokens (are already on the dfWallet)
+            IDfWallet(flashloanData.dfWallet).deposit(
+                flashloanData.token, flashloanData.cToken, add(flashloanData.deposit, flashloanData.debt), address(0), address(0), 0
+            );
+
+            // redeem eth loan
+            // Compound Quick Maths – redeemAmountIn * 1e18 * 1e18 / exchangeRateCurrent / 1e18
+            uint cEthToExtract = loanEth.mul(1e36).div(ICToken(CETH_ADDRESS).exchangeRateCurrent()).div(1e18);
+            IDfWallet(flashloanData.dfWallet).redeem(
+                ETH_ADDRESS, CETH_ADDRESS, cEthToExtract
+            );
+            IDfWallet(flashloanData.dfWallet).withdrawToken(
+                ETH_ADDRESS, address(this), IToken(ETH_ADDRESS).universalBalanceOf(flashloanData.dfWallet)
+            );
+
+            // ETH to WETH for loan
+            IWeth(WETH_ADDRESS).deposit.value(loanEth)();
+        } else if (state == OP.WITHDRAW_USING_DYDX_ETH) {
+            // use dYdX flashloans without fee
+            FlashloanDataDyDxEth memory flashloanData = abi.decode(data, (FlashloanDataDyDxEth));
+
         }
     }
 
