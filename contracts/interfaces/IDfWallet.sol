@@ -22,4 +22,6 @@ interface IDfWallet {
 
     function withdrawToken(address _tokenAddr, address to, uint256 amount) external;
 
+    function redeem(address _tokenAddr, address _cTokenAddr, uint256 amount) external; 
+
 }

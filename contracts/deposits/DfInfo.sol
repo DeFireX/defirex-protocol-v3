@@ -2,23 +2,10 @@ pragma solidity ^0.5.16;
 
 import "../constants/ConstantAddressesMainnet.sol";
 
-import "../interfaces/IPriceOracle.sol";
 import "../interfaces/IERC20.sol";
 import "../interfaces/IDfTokenizedDeposit.sol";
 import "../compound/interfaces/ICToken.sol";
-
-interface IComptroller {
-    function oracle() external view returns (IPriceOracle);
-
-    function getAccountLiquidity(address)
-        external
-        view
-        returns (
-            uint256,
-            uint256,
-            uint256
-        );
-}
+import "../interfaces/IComptroller.sol";
 
 contract DfInfo is ConstantAddresses {
     function getInfo(IDfTokenizedDeposit dfTokenizedDepositAddress)
@@ -109,7 +96,7 @@ contract DfInfo is ConstantAddresses {
         uint256 usdcPrice = compOracle.price("USDC");
         uint256 ethPrice = compOracle.price("ETH");
 
-        land =
+        uint land =
         (ICToken(CDAI_ADDRESS).balanceOfUnderlying(walletAddress) * daiPrice) /
         10**6 +
         (ICToken(CUSDC_ADDRESS).balanceOfUnderlying(walletAddress) * usdcPrice) /
@@ -117,7 +104,7 @@ contract DfInfo is ConstantAddresses {
         (ICToken(CETH_ADDRESS).balanceOfUnderlying(walletAddress) * ethPrice) /
         10**6;
 
-        cred +=
+        uint cred =
         (ICToken(CDAI_ADDRESS).borrowBalanceCurrent(walletAddress) *
         daiPrice) /
         10**6;

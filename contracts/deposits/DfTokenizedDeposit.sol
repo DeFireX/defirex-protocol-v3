@@ -195,7 +195,7 @@ contract DfTokenizedDeposit is
                     if (amounts[0] > fee) {
                         amounts[0] -= fee;
                     } else {
-                        amounts[2] = sub(amounts[2], wdiv(fee, getEthPrice()))
+                        amounts[2] = sub(amounts[2], wdiv(fee, getEthPrice()));
                     }
                 }
                 if (flashLoanUSDC > 0) {
@@ -265,7 +265,7 @@ contract DfTokenizedDeposit is
         }
     }
 
-    function isSafe() view public returns (bool){
+    function isSafe() public returns (bool){
         return (minCRate < 75 * 1000) ? dfInfo.getCRate(address(this)) < minCRate : true;
     }
 
@@ -293,7 +293,7 @@ contract DfTokenizedDeposit is
                     if (amountDAI > fee) {
                         amountDAI -= fee;
                     } else {
-                        amountETH = sub(amountETH, wdiv(fee, getEthPrice()))
+                        amountETH = sub(amountETH, wdiv(fee, getEthPrice()));
                     }
                 }
                 if (flashLoanUSDC > 0) {
