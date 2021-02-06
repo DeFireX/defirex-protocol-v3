@@ -40,8 +40,20 @@ contract DfPool is Initializable, OwnableUpgradable, DSMath {
         OwnableUpgradable.initialize(msg.sender);    // Initialize Parent Contract
     }
 
-    // ** PUBLIC VIEW functions **
+//    function initOnce() public {
+//        require(profits.length == 0);
+//        // migrate from old contract
+//        profits.push(ProfitData(3003751, 50000));
+//        profits.push(ProfitData(4416559, 500000));
+//
+//        // init dfProfits
+//        if (dfProfits == DfProfits(0)) {
+//            dfProfits = new DfProfits(address(this));
+//            emit CreateDfProfit(address(dfProfits));
+//        }
+//    }
 
+    // ** PUBLIC VIEW functions **
     function calcUserProfit(address userAddress, uint256 max) public view returns(
         uint256 totalDaiProfit, uint64 index
     ) {
@@ -85,7 +97,9 @@ contract DfPool is Initializable, OwnableUpgradable, DSMath {
 
     // 1 dDai == 1 dai dDai
     function withdraw(uint256 _amount) public {
-        dDai.burnFrom(msg.sender, _amount);
+        // dDai.transferFrom(msg.sender, address(this), _amount);
+        dDai.burnFrom(msg.sender, _amount); // use burnFrom & mint to emulate transferFrom (user don't need to approve)
+        dDai.mint(address(this), _amount);
         dai.transfer(msg.sender, _amount);
     }
 
@@ -126,10 +140,7 @@ contract DfPool is Initializable, OwnableUpgradable, DSMath {
         ProfitData memory p;
         p.blockNumber = uint64(block.number);
 
-        if (dfProfits == DfProfits(0)) {
-            dfProfits = new DfProfits(address(this));
-            emit CreateDfProfit(address(dfProfits));
-        }
+        require(address(dfProfits) != address(0));
 
         dai.transferFrom(msg.sender, address(dfProfits), _amount);
         p.daiProfit = uint64(_amount / 1e12); // reduce decimals to 1e6
