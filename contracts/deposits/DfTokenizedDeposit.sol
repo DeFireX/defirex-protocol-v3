@@ -51,6 +51,11 @@ interface ITokenUSDT {
     function transfer(address to, uint value) external; // USDT don't return bool
 }
 
+contract IDfProxy {
+    function cast(address payable _to, bytes calldata _data) external payable;
+    function withdrawEth(address payable _to) external;
+}
+
 contract DfTokenizedDeposit is
     Initializable,
     Adminable,
@@ -91,7 +96,7 @@ contract DfTokenizedDeposit is
 
     IUniswapV2Router02 constant uniRouter = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); // same for kovan and mainnet
     IDfInfo constant dfInfo = IDfInfo(0xee5aEb4314BF8C0A2f0A704305E599343480DbF1); // mainnet address
-    address constant bridge = address(0x69c707d975e8d883920003CC357E556a4732CD03); // mainnet address 
+    address constant bridge = address(0x69c707d975e8d883920003CC357E556a4732CD03); // mainnet address
 
     IDfDepositToken public tokenETH;
     IDfDepositToken public tokenUSDC;
@@ -112,6 +117,10 @@ contract DfTokenizedDeposit is
     uint256 public minCRate;
 
     mapping(uint256 => uint256) ethCoefSnapshoted;
+
+    IDfProxy constant dfProxy = IDfProxy(0xdAE0aca4B9B38199408ffaB32562Bf7B3B0495fE); // TODO: set id Proxy
+    // we use extendedLogic contract due to Contract size limitations
+    address constant extendedLogic = 0xdAE0aca4B9B38199408ffaB32562Bf7B3B0495fE; // TODO: set logic address
 
 //    function initialize() public initializer {
 //        address payable curOwner = 0xdAE0aca4B9B38199408ffaB32562Bf7B3B0495fE;
@@ -233,9 +242,11 @@ contract DfTokenizedDeposit is
                 tokenDeposit.transferFrom(msg.sender, _liquidityProviderAddress, amount);
                 if (address(targetAsset) == WETH_ADDRESS) {
                     // WETH (this) => ETH (withdraw) => ETH (msg.sender)
-                    targetAsset.transferFrom(_liquidityProviderAddress, address(this), amount);
-                    IToken(WETH_ADDRESS).withdraw(amount);
-                    address(uint160(msg.sender)).transfer(amount);
+                    targetAsset.transferFrom(_liquidityProviderAddress, address(dfProxy), amount);
+                    // Withdraw WETH + transfer all ETH to msg.sender
+                    // use dfProxy because WETH send ETH via transfer function that fails with Out of gas error for upgradable contracts
+                    dfProxy.cast(address(uint160(WETH_ADDRESS)), abi.encodeWithSelector(IToken(WETH_ADDRESS).withdraw.selector, amount));
+                    dfProxy.withdrawEth(msg.sender);
                 } else {
                     targetAsset.transferFrom(_liquidityProviderAddress, msg.sender, amount);
                 }
@@ -507,7 +518,6 @@ contract DfTokenizedDeposit is
     }
 
     // we use extendedLogic contract due to Contract size limitations
-    address constant extendedLogic = 0xdAE0aca4B9B38199408ffaB32562Bf7B3B0495fE; // TODO: set logic address
     function delegateCall(bytes memory data) onlyOwnerOrAdmin public returns (bytes memory response)  {
         bool success;
         (success, response) = extendedLogic.delegatecall(data);
