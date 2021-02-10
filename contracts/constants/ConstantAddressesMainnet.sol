@@ -21,4 +21,7 @@ contract ConstantAddresses {
     address public constant COMP_ADDRESS = 0xc00e94Cb662C3520282E6f5717214004A7f26888;
 
     address public constant USDT_ADDRESS = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
+
+    // proxy for eth transfer (gas limit)
+    address public constant DF_PROXY_ADDRESS = 0x7a925f91a4583E87b355f6CE15B2C3BF26E3449F;
 }
