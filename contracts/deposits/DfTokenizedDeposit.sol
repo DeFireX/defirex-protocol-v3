@@ -229,7 +229,7 @@ contract DfTokenizedDeposit is
 
             uint256 totalDWBTC = tokenWBTC.totalSupply();
             // = ( totalDaiLoanForWBTC * totalDWBTC + daiLoanForWBTC ) / (totalDWBTC + amounts[1])
-            totalDaiLoanForWBTC = wdiv(add(wmul(totalDaiLoanForWBTC, totalDWBTC), daiLoanForWBTC), add(totalDWBTC, amounts[1]));
+            totalDaiLoanForWBTC = wdiv(add(wmul(totalDaiLoanForWBTC/* 18 */, totalDWBTC * 1e10/* 8+10 */), daiLoanForWBTC), add(totalDWBTC, amounts[1]) * 1e10); // convert WBTC to 1e18 (8+10)
 
             if (amounts[0] > 0) token.mint(msg.sender, amounts[0]);
             if (amounts[1] > 0) tokenWBTC.mint(msg.sender, amounts[1]);
@@ -282,16 +282,16 @@ contract DfTokenizedDeposit is
         flashLoanDAI = wmul(amountDAI, _crate);
         if (amountWBTC > 0) {
             if (isDeposit) {
-                daiLoanForWBTC = wmul(wmul(amountWBTC * compOracle.price("WBTC") * _daiPrice / 1e12, _ethCoef), (_crate + 1e18));
+                daiLoanForWBTC = wmul(wmul(amountWBTC * compOracle.price("WBTC") * _daiPrice / 1e2, _ethCoef), (_crate + 1e18)); // 8 + 6 + 6 - 12 + 10 = 18
             } else {
-                daiLoanForWBTC = wmul(totalDaiLoanForWBTC, amountWBTC);
+                daiLoanForWBTC = wmul(totalDaiLoanForWBTC, amountWBTC * 1e10); // 8+10
             }
 
             flashLoanDAI += daiLoanForWBTC;
         }
         if (amountETH > 0)  {
             if (isDeposit) {
-                daiLoanForEth = wmul(wmul(amountETH * compOracle.price("ETH") * _daiPrice / 1e12, _ethCoef), (_crate + 1e18));
+                daiLoanForEth = wmul(wmul(amountETH * compOracle.price("ETH") * _daiPrice / 1e12, _ethCoef), (_crate + 1e18)); // 18 + 6 + 6 - 12
             } else {
                 daiLoanForEth = wmul(totalDaiLoanForEth, amountETH);
             }
