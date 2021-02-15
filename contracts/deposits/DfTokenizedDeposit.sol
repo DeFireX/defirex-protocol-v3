@@ -332,10 +332,8 @@ contract DfTokenizedDeposit is
 
             // when burn tokens user should pay more d-tokens
             if (_providerType == IDfFinanceDeposits.FlashloanProvider.AAVE) {
-                if (flashLoanDAI > 0) {
-                    uint256 fee = wmul(flashLoanDAI, aaveFee);
-                    amountDAI = add(amountDAI, fee); // comission in dDAI will be burned
-                }
+                uint256 fee = wmul(flashLoanDAI, aaveFee);
+                amountDAI = add(amountDAI, fee); // comission in dDAI will be burned
             }
 
             if (amountDAI > 0) token.burnFrom(msg.sender, amountDAI);
@@ -469,7 +467,10 @@ contract DfTokenizedDeposit is
     }
 
     function skipProfits(address _target, uint64 newProfitIndex) onlyOwnerOrAdmin public {
-        require((_target == msg.sender) || (admins[msg.sender] && _target == bridge) || (IDefiController(_target).defiController() == msg.sender));
+        require((_target == msg.sender) ||
+                (admins[msg.sender] && (_target == bridge || _target == getUniswapAddress())) ||
+                (IDefiController(_target).defiController() == msg.sender));
+
         uint256 currentProfitIndex = lastProfitDistIndex[_target];
         require(newProfitIndex > currentProfitIndex); // only skip
         uint256 balanceAtBlock;
