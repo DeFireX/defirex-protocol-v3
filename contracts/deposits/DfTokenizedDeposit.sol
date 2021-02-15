@@ -282,7 +282,7 @@ contract DfTokenizedDeposit is
         flashLoanDAI = wmul(amountDAI, _crate);
         if (amountWBTC > 0) {
             if (isDeposit) {
-                daiLoanForWBTC = wmul(wmul(amountWBTC * compOracle.price("WBTC") * _daiPrice / 1e2, _ethCoef), (_crate + 1e18)); // 8 + 6 + 6 - 12 + 10 = 18
+                daiLoanForWBTC = wmul(wmul(amountWBTC * compOracle.price("BTC") * _daiPrice / 1e2, _ethCoef), (_crate + 1e18)); // 8 + 6 + 6 - 12 + 10 = 18
             } else {
                 daiLoanForWBTC = wmul(totalDaiLoanForWBTC, amountWBTC * 1e10); // 8+10
             }
@@ -589,7 +589,7 @@ contract DfTokenizedDeposit is
         IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
         if (address(tokenETH) != address(0x0)) tokenETH.snapshot(compOracle.price("ETH"));
         if (address(tokenUSDC) != address(0x0)) tokenUSDC.snapshot();
-        if (address(tokenWBTC) != address(0x0)) tokenWBTC.snapshot(compOracle.price("WBTC"));
+        if (address(tokenWBTC) != address(0x0)) tokenWBTC.snapshot(compOracle.price("BTC"));
 
         ethCoefSnapshoted[profits.length - 1] = ethCoef;
         lastFixProfit = now;
