@@ -585,9 +585,9 @@ contract DfTokenizedDeposit is
         token.snapshot();
 
         IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
-        if (address(tokenETH) != address(0x0)) tokenETH.snapshot(compOracle.price("ETH"));
-        if (address(tokenUSDC) != address(0x0)) tokenUSDC.snapshot();
-        if (address(tokenWBTC) != address(0x0)) tokenWBTC.snapshot(compOracle.price("BTC"));
+        tokenETH.snapshot(compOracle.price("ETH"));
+        tokenUSDC.snapshot();
+        tokenWBTC.snapshot(compOracle.price("BTC"));
 
         ethCoefSnapshoted[profits.length - 1] = ethCoef;
         lastFixProfit = now;
