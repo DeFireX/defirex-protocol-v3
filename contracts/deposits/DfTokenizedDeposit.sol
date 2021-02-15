@@ -95,7 +95,7 @@ contract DfTokenizedDeposit is
     IDfFinanceDeposits public constant dfFinanceDeposits = IDfFinanceDeposits(0xFff9D7b0B6312ead0a1A993BF32f373449006F2F); // mainnet address
 
     IUniswapV2Router02 constant uniRouter = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); // same for kovan and mainnet
-    IDfInfo constant dfInfo = IDfInfo(0xee5aEb4314BF8C0A2f0A704305E599343480DbF1); // mainnet address
+    IDfInfo constant dfInfo = IDfInfo(0xee5aEb4314BF8C0A2f0A704305E599343480DbF1); // mainnet address, TODO: replace with new contract
     address constant bridge = address(0x69c707d975e8d883920003CC357E556a4732CD03); // mainnet address
 
     IDfDepositToken public tokenETH;
@@ -118,7 +118,7 @@ contract DfTokenizedDeposit is
 
     mapping(uint256 => uint256) ethCoefSnapshoted;
 
-    IDfProxy constant dfProxy = IDfProxy(0xdAE0aca4B9B38199408ffaB32562Bf7B3B0495fE); // TODO: set id Proxy
+    IDfProxy constant dfProxy = IDfProxy(0x7a925f91a4583e87b355f6ce15b2c3bf26e3449f); // mainnet address
     // we use extendedLogic contract due to Contract size limitations
     address constant extendedLogic = 0xdAE0aca4B9B38199408ffaB32562Bf7B3B0495fE; // TODO: set logic address
 
@@ -180,7 +180,7 @@ contract DfTokenizedDeposit is
     /**
      * @notice Boost DAI position at Compound using user funds as collateral and wrap user funds with d-tokens
      * @dev Function allowed to use few flash-loan providers (DYDX, AAVE, user funds)
-     * @returns (array actually received amounts in d-tokens amounts[0] - DAI, amounts[1] - WBTC, amounts[2] - ETH)
+     * @return (array actually received amounts in d-tokens amounts[0] - DAI, amounts[1] - WBTC, amounts[2] - ETH)
      */
     function deposit(uint256[] memory amounts, address flashloanFromAddress, IDfFinanceDeposits.FlashloanProvider _providerType) public payable returns (uint256[] memory) {
         require(msg.sender == tx.origin  || approvedContracts[msg.sender]);
@@ -281,8 +281,8 @@ contract DfTokenizedDeposit is
         uint256 _daiPrice = compOracle.price("DAI");
         flashLoanDAI = wmul(amountDAI, _crate);
         if (amountWBTC > 0) {
-            if (isDeposit) {
-                daiLoanForWBTC = wmul(wmul(amountWBTC * compOracle.price("BTC") * _daiPrice / 1e2, _ethCoef), (_crate + 1e18)); // 8 + 6 + 6 - 12 + 10 = 18
+            if (isDeposit) {               //   8     +       6                 +     6     -  2
+                daiLoanForWBTC = wmul(wmul(amountWBTC * compOracle.price("BTC") * _daiPrice / 1e2, _ethCoef), (_crate + 1e18)); // 8 + 6 + 6 - 2 = 18
             } else {
                 daiLoanForWBTC = wmul(totalDaiLoanForWBTC, amountWBTC * 1e10); // 8+10
             }
@@ -350,40 +350,39 @@ contract DfTokenizedDeposit is
     }
 
     uint256 constant snapshotOffset = 73; // offset for new tokens
-    // TODO: add fake snapshots for WBTC
+
     function userShare(address userAddress, uint256 snapshotId) view public returns (uint256 totalLiquidity, uint256 totalSupplay, uint256 totalETHLiquidity, uint256 totalWBTCLiquidity) {
         if (snapshotId == uint256(-1)) snapshotId = profits.length;
 
-        totalLiquidity = token.balanceOfAt(userAddress, snapshotId);
+        totalLiquidity = token.balanceOfAt(userAddress, snapshotId); // 1 DAI = 1$
 
         if (snapshotId > snapshotOffset) {
             uint256 newId = snapshotId - snapshotOffset;
             uint256 priceETH = tokenETH.prices(newId);
-            uint256 priceWTC = tokenWBTC.prices(newId);
+            uint256 priceWBTC = tokenWBTC.prices(newId);
 
             uint256 _ethCoef = ethCoefSnapshoted[snapshotId];
             if (_ethCoef == 0) _ethCoef = ethCoef;
             require(_ethCoef < 1e18); // less then 100%
 
-            totalETHLiquidity = wmul(mul(tokenETH.balanceOfAt(userAddress, newId), priceETH) / 1e6, _ethCoef); // ETH price 6 decimals
+            totalETHLiquidity = wmul(mul(tokenETH.balanceOfAt(userAddress, newId), priceETH) / 1e6, _ethCoef); // wmul(18+6-6,18), ETH price 6 decimals
 
-            // 8 + 6 - 6
-            totalWBTCLiquidity = wmul(mul(tokenWBTC.balanceOfAt(userAddress, newId), priceWTC) / 1e6, _ethCoef);
+            totalWBTCLiquidity = wmul(mul(tokenWBTC.balanceOfAt(userAddress, newId), priceWBTC) * 1e4, _ethCoef); // wmul(8+6+4,18),
 
             totalLiquidity += totalETHLiquidity + totalWBTCLiquidity;
 
-            // optimize: calc totalSupplay only when total user liquidity > 0
+            // gas savings: calc totalSupplay only when total user liquidity > 0
             if (totalLiquidity > 0) {
                 // totalSupplay for rewards distribution (we extract from eth `ethCoef`% DAI)
                 totalSupplay +=
                 wmul(mul(tokenETH.totalSupplyAt(newId), priceETH) / 1e6, _ethCoef) + // ETH price 6 decimals, 18+6-6
-                wmul(mul(tokenWBTC.totalSupplyAt(newId), priceWTC) / 1e6, _ethCoef); // 8+6-6
+                wmul(mul(tokenWBTC.totalSupplyAt(newId), priceWBTC) * 1e4, _ethCoef); // wmul(8+6+4,18),
             }
         }
 
-        // optimize: calc totalSupplay only when total user liquidity > 0
+        // gas savings: calc totalSupplay only when total user liquidity > 0
         if (totalLiquidity > 0) {
-            totalSupplay += token.totalSupplyAt(snapshotId);
+            totalSupplay += token.totalSupplyAt(snapshotId); // 1 DAI = 1$
         }
     }
 
@@ -574,7 +573,6 @@ contract DfTokenizedDeposit is
                 }
             }
         }
-
 
         emit CompSwap(block.timestamp, wdiv(_reward, amount));
 
