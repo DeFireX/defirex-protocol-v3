@@ -117,6 +117,10 @@ DSMath
     uint256 public minCRate;
 
     mapping(uint256 => uint256) ethCoefSnapshoted;
+
+    IDfDepositToken public tokenWBTC;
+
+    uint256 public totalDaiLoanForWBTC;
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
     function getFlashLoanAmounts(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, bool isDeposit) internal returns (uint256 flashLoanDAI, uint256 flashLoanUSDC, uint256 daiLoanForEth) {
