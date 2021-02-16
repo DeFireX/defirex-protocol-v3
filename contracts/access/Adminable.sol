@@ -31,11 +31,11 @@ contract Adminable is Initializable, Ownable {
         admins[_admin] = _status;
     }
 
-    function setAdminPermission(address[] memory _admins, bool _status) public onlyOwner {
-        for (uint i = 0; i < _admins.length; i++) {
-            admins[_admins[i]] = _status;
-        }
-    }
+//    function setAdminPermission(address[] memory _admins, bool _status) public onlyOwner {
+//        for (uint i = 0; i < _admins.length; i++) {
+//            admins[_admins[i]] = _status;
+//        }
+//    }
 
 
     uint256[50] private ______gap;

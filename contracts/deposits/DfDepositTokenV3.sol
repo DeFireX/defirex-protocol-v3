@@ -17,7 +17,7 @@ contract DfDepositToken is
     ERC20Delegatable
 {
     mapping(uint256 => uint256) public prices;
-
+    uin256 public offset;
     // ** INITIALIZER **
 
     function initialize(
@@ -25,10 +25,12 @@ contract DfDepositToken is
         string memory _symbol,
         uint8 _decimals,
         address payable _controller
+        uint256 _offset
     ) public initializer {
         // Initialize Parents Contracts
         ERC20Detailed.initialize(_name, _symbol, _decimals);
         Ownable.initialize(_controller);
+        offset = _offset;
     }
 
 
@@ -55,10 +57,26 @@ contract DfDepositToken is
         prices[currentId] = price;
     }
 
+
+    /**
+     * @dev Retrieves the balance of `account` at the time `snapshotId` was created.
+    */
+    function balanceOfAt(address account, uint256 snapshotId) public view returns (uint256) {
+        uint256 _offset = offset;
+        if (snapshotId <= _offset) return 0;
+        snapshotId -= _offset;
+        (bool snapshotted, uint256 value) = _valueAt(snapshotId, _accountBalanceSnapshots[account]);
+
+        return snapshotted ? value : balanceOf(account);
+    }
+
     /**
      * @dev Retrieves the total supply at the time `snapshotId` was created.
      */
     function totalSupplyAt(uint256 snapshotId) public view returns(uint256) {
+        uint256 _offset = offset;
+        if (snapshotId <= _offset) return 0;
+        snapshotId -= _offset;
         (bool snapshotted, uint256 value) = _valueAt(snapshotId, _totalSupplySnapshots);
 
         return (snapshotted ? value : totalSupply());

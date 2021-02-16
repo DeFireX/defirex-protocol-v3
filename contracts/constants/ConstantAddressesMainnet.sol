@@ -3,7 +3,7 @@ pragma solidity ^0.5.16;
 
 contract ConstantAddresses {
     address public constant COMPTROLLER = 0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B;
-    address public constant COMPOUND_ORACLE = 0x1D8aEdc9E924730DD3f9641CDb4D1B92B848b4bd;
+//    address public constant COMPOUND_ORACLE = 0x1D8aEdc9E924730DD3f9641CDb4D1B92B848b4bd;
 
     address public constant ETH_ADDRESS = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
     address public constant WETH_ADDRESS = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
@@ -21,4 +21,7 @@ contract ConstantAddresses {
     address public constant COMP_ADDRESS = 0xc00e94Cb662C3520282E6f5717214004A7f26888;
 
     address public constant USDT_ADDRESS = 0xdAC17F958D2ee523a2206206994597C13D831ec7;
+
+    // proxy for eth transfer (gas limit)
+    address public constant DF_PROXY_ADDRESS = 0x7a925f91a4583E87b355f6CE15B2C3BF26E3449F;
 }

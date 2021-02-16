@@ -23,6 +23,7 @@ import "../interfaces/IToken.sol";
 import "../interfaces/IComptrollerLensInterface.sol";
 import "../interfaces/IComptroller.sol";
 import "../interfaces/IWeth.sol";
+import "../interfaces/IDfProxy.sol";
 
 
 contract DfFinanceDeposits is
@@ -582,8 +583,11 @@ contract DfFinanceDeposits is
             FlashloanDataDyDxEth memory flashloanData = abi.decode(data, (FlashloanDataDyDxEth));
             uint256 loanEth = flashloanData.ethAmountFlashLoan;
 
-            // WETH to ETH for loan
-            IWeth(WETH_ADDRESS).withdraw(loanEth);
+            // WETH to ETH for loan using proxy (eth transfer gas limit)
+            IDfProxy dfProxy = IDfProxy(DF_PROXY_ADDRESS);
+            IERC20(WETH_ADDRESS).transfer(address(dfProxy), loanEth);
+            dfProxy.cast(address(uint160(WETH_ADDRESS)), abi.encodeWithSelector(IWeth(WETH_ADDRESS).withdraw.selector, loanEth));
+            dfProxy.withdrawEth(address(this));
 
             // deposit eth loan and borrow debt tokens
             IDfWallet(flashloanData.dfWallet).deposit.value(loanEth)(
@@ -595,14 +599,11 @@ contract DfFinanceDeposits is
                 flashloanData.token, flashloanData.cToken, add(flashloanData.deposit, flashloanData.debt), address(0), address(0), 0
             );
 
-            // redeem eth loan
+            // redeem eth loan (using withdraw function)
             // Compound Quick Maths – redeemAmountIn * 1e18 * 1e18 / exchangeRateCurrent / 1e18
             uint cEthToExtract = loanEth.mul(1e36).div(ICToken(CETH_ADDRESS).exchangeRateCurrent()).div(1e18);
-            IDfWallet(flashloanData.dfWallet).redeem(
-                ETH_ADDRESS, CETH_ADDRESS, cEthToExtract
-            );
-            IDfWallet(flashloanData.dfWallet).withdrawToken(
-                ETH_ADDRESS, address(this), IToken(ETH_ADDRESS).universalBalanceOf(flashloanData.dfWallet)
+            IDfWallet(flashloanData.dfWallet).withdraw(
+                ETH_ADDRESS, CETH_ADDRESS, cEthToExtract, ETH_ADDRESS, CETH_ADDRESS, 0
             );
 
             // ETH to WETH for loan
@@ -612,13 +613,17 @@ contract DfFinanceDeposits is
             FlashloanDataDyDxEth memory flashloanData = abi.decode(data, (FlashloanDataDyDxEth));
             uint256 loanEth = flashloanData.ethAmountFlashLoan;
 
-            // WETH to ETH for loan
-            IWeth(WETH_ADDRESS).withdraw(loanEth);
+            // WETH to ETH for loan using proxy (eth transfer gas limit)
+            IDfProxy dfProxy = IDfProxy(DF_PROXY_ADDRESS);
+            IERC20(WETH_ADDRESS).transfer(address(dfProxy), loanEth);
+            dfProxy.cast(address(uint160(WETH_ADDRESS)), abi.encodeWithSelector(IWeth(WETH_ADDRESS).withdraw.selector, loanEth));
+            dfProxy.withdrawEth(address(this));
 
             // deposit eth loan and borrow debt tokens
             IDfWallet(flashloanData.dfWallet).deposit.value(loanEth)(
                 ETH_ADDRESS, CETH_ADDRESS, loanEth, flashloanData.token, flashloanData.cToken, flashloanData.debt
             );
+            IDfWallet(flashloanData.dfWallet).withdrawToken(flashloanData.token, address(this), flashloanData.debt);
 
             // repay debt tokens and redeem deposit + debt tokens
             // Compound Quick Maths – redeemAmountIn * 1e18 * 1e18 / exchangeRateCurrent / 1e18

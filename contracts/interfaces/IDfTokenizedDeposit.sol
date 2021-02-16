@@ -8,6 +8,7 @@ interface IDfTokenizedDeposit {
 
     function tokenETH() external returns (IERC20);
     function tokenUSDC() external returns (IERC20);
+    function tokenWBTC() external returns (IERC20);
 
     function fundsUnwinded(address) external returns (uint256);
 }
