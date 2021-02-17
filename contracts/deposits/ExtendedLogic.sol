@@ -60,7 +60,7 @@ DSMath
     // The same state as tokenized deposit
     address public constant COMPTROLLER = 0x3d9819210A31b4961b30EF54bE2aeD79B9c9Cd3B;
     address public constant WETH_ADDRESS = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
-    address public constant USDC_ADDRESS = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+    address public constant WBTC_ADDRESS = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
     address public constant DAI_ADDRESS = 0x6B175474E89094C44Da98b954EedeAC495271d0F;
 
     struct ProfitData {
@@ -121,19 +121,30 @@ DSMath
     IDfDepositToken public tokenWBTC;
 
     uint256 public totalDaiLoanForWBTC;
+
+    uint256 public btcCoef;
+    mapping(uint256 => uint256) btcCoefSnapshoted;
     //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    function getFlashLoanAmounts(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, bool isDeposit) internal returns (uint256 flashLoanDAI, uint256 flashLoanUSDC, uint256 daiLoanForEth) {
+    function getFlashLoanAmounts(uint256 amountDAI, uint256 amountWBTC, uint256 amountETH, bool isDeposit) internal returns (uint256 flashLoanDAI, uint256 daiLoanForWBTC, uint256 daiLoanForEth) {
         IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
         uint256 _crate = crate;
         uint256 _ethCoef = ethCoef;
         require(_crate > 0 && _ethCoef > 0);
         uint256 _daiPrice = compOracle.price("DAI");
         flashLoanDAI = wmul(amountDAI, _crate);
-        if (amountUSDC > 0) flashLoanUSDC = wmul(amountUSDC, _crate);
+        if (amountWBTC > 0) {
+            if (isDeposit) {               //   8     +       6                 +     6     -  2
+                daiLoanForWBTC = wmul(wmul(amountWBTC * compOracle.price("BTC") * _daiPrice / 1e2, btcCoef), (_crate + 1e18)); // 8 + 6 + 6 - 2 = 18
+            } else {
+                daiLoanForWBTC = wmul(totalDaiLoanForWBTC, amountWBTC * 1e10); // 8+10
+            }
+
+            flashLoanDAI += daiLoanForWBTC;
+        }
         if (amountETH > 0)  {
             if (isDeposit) {
-                daiLoanForEth = wmul(wmul(amountETH * compOracle.price("ETH") * _daiPrice / 1e12, _ethCoef), (_crate + 1e18));
+                daiLoanForEth = wmul(wmul(amountETH * compOracle.price("ETH") * _daiPrice / 1e12, _ethCoef), (_crate + 1e18)); // 18 + 6 + 6 - 12
             } else {
                 daiLoanForEth = wmul(totalDaiLoanForEth, amountETH);
             }
@@ -142,58 +153,75 @@ DSMath
         }
     }
 
-    // amounts[0] - DAI amounts[1] - USDC amounts[2] - ETH
-    function sync(IDfFinanceDeposits.FlashloanProvider _providerType, address flashLoanFromAddress, uint256 _newCRate, uint256 _newEthCoef, uint256[3] memory amounts, bool check) onlyOwnerOrAdmin public returns (uint256 avgCRate, uint256 avgEthCoef, uint256 f)  {
-        IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
-        uint256 _daiPrice = compOracle.price("DAI") * 1e12;
-        uint256 _ethPrice = compOracle.price("ETH") * 1e12;
+    // amounts[0] - DAI amounts[1] - WBTC amounts[2] - ETH
+    // @return [uint256 avgCRate, uint256 avgEthCoef, uint256 avgBtcCoef, uint256 f, uint256 liquidity]
+    function sync(IDfFinanceDeposits.FlashloanProvider _providerType, address flashLoanFromAddress, uint256 _newCRate, uint256 _newEthCoef, uint256 _newBtcCoef, uint256[3] memory amounts, bool check) onlyOwnerOrAdmin public returns (uint256[5] memory ret)  {
 
         unwindFunds(amounts[0], amounts[1], amounts[2], _providerType, flashLoanFromAddress);
 
         { // fix "stack too deep"
+            IPriceOracle compOracle = IComptroller(COMPTROLLER).oracle();
+            uint256 _daiPrice = compOracle.price("DAI") * 1e12;
+            uint256 _ethPrice = compOracle.price("ETH") * 1e12;
+            uint256 _btcPrice = compOracle.price("BTC") * 1e12;
+
             uint256 amountTotalETH = tokenETH.totalSupply();
-            uint256 totalShare = wdiv(amounts[0] + wmul(amounts[1] * 1e12, _daiPrice) + wmul(wmul(wmul(amounts[2], ethCoef) , _ethPrice), _daiPrice),
-                token.totalSupply() + wmul(tokenUSDC.totalSupply() * 1e12, _daiPrice) + wmul(wmul(wmul(amountTotalETH, ethCoef), _ethPrice), _daiPrice)
+            uint256 amountTotalBTC = tokenWBTC.totalSupply() * 1e10; // calc in 18 dec
+            uint256 totalShare = wdiv(amounts[0] + // DAI
+                                      wmul(wmul(wmul(amounts[1] * 1e10, btcCoef) , _btcPrice), _daiPrice) + // BTC
+                                      wmul(wmul(wmul(amounts[2], ethCoef) , _ethPrice), _daiPrice), // ETH
+                // /
+                token.totalSupply() + // DAI
+                wmul(wmul(wmul(amountTotalBTC, btcCoef), _btcPrice), _daiPrice) + // BTC
+                wmul(wmul(wmul(amountTotalETH, ethCoef), _ethPrice), _daiPrice) // ETH
             );
             if (_newCRate > 100) {
-                avgCRate = (crate * sub(1e18, totalShare) +  _newCRate * totalShare) / 1e18;
+                ret[0] = (crate * sub(1e18, totalShare) +  _newCRate * totalShare) / 1e18;
                 crate = _newCRate;
             }
+
+            if (_newBtcCoef > 100) {
+                uint256 shareBtc = wdiv(amounts[1] * 1e10, amountTotalBTC);
+                ret[2] =  (btcCoef * sub(1e18, shareBtc) +  _newBtcCoef * shareBtc) / 1e18;
+                btcCoef = _newBtcCoef;
+            }
+
             if (_newEthCoef > 100) {
                 uint256 shareEth = wdiv(amounts[2], amountTotalETH);
-                avgEthCoef =  (ethCoef * sub(1e18, shareEth) +  _newEthCoef * shareEth) / 1e18;
+                ret[1] =  (ethCoef * sub(1e18, shareEth) +  _newEthCoef * shareEth) / 1e18;
                 ethCoef = _newEthCoef;
             }
         }
 
         boostFunds(amounts[0], amounts[1], amounts[2], _providerType, flashLoanFromAddress);
 
-        if (avgCRate > 0) crate = avgCRate;
-        if (avgEthCoef > 0) ethCoef = avgEthCoef;
+        if (ret[0] > 0) crate = ret[0];
+        if (ret[1] > 0) ethCoef = ret[1];
+        if (ret[2] > 0) btcCoef = ret[2];
 
         if (check) {
-            (,,,,f,,,) = dfInfo.getInfo(address(this));
+            (ret[4],,,,ret[3],,,) = dfInfo.getInfo(address(this));
         }
     }
 
-    function unwindFunds(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, IDfFinanceDeposits.FlashloanProvider _providerType, address flashLoanFromAddress) public onlyOwnerOrAdmin {
-        (uint256 flashLoanDAI, uint256 flashLoanUSDC,) = getFlashLoanAmounts(amountDAI, amountUSDC, amountETH, false);
+    function unwindFunds(uint256 amountDAI, uint256 amountWBTC, uint256 amountETH, IDfFinanceDeposits.FlashloanProvider _providerType, address flashLoanFromAddress) public onlyOwnerOrAdmin {
+        (uint256 flashLoanDAI,,) = getFlashLoanAmounts(amountDAI, amountWBTC, amountETH, false);
 
         uint256 balanceDAI;
-        uint256 balanceUSDC;
+        uint256 balanceWBTC;
         if (amountDAI > 0) balanceDAI = IToken(DAI_ADDRESS).balanceOf(address(this));
-        if (amountUSDC > 0) balanceUSDC = IToken(USDC_ADDRESS).balanceOf(address(this));
-        dfFinanceDeposits.withdraw(dfWallet, amountDAI, amountUSDC, amountETH, 0, address(this), flashLoanDAI, flashLoanUSDC, _providerType, flashLoanFromAddress);
+        if (amountWBTC > 0) balanceWBTC = IToken(WBTC_ADDRESS).balanceOf(address(this));
+        dfFinanceDeposits.withdraw(dfWallet, amountDAI, amountWBTC, amountETH, 0, address(this), flashLoanDAI, 0, _providerType, flashLoanFromAddress);
 
         if (amountDAI > 0) {
             balanceDAI = sub(IToken(DAI_ADDRESS).balanceOf(address(this)), balanceDAI);
             if (amountDAI > balanceDAI) emit Credit(DAI_ADDRESS, amountDAI - balanceDAI); // system lose via credit
             fundsUnwinded[DAI_ADDRESS] += amountDAI;
         }
-        if (amountUSDC > 0) {
-            balanceUSDC = sub(IToken(USDC_ADDRESS).balanceOf(address(this)), balanceUSDC);
-            if (amountUSDC > balanceUSDC) emit Credit(USDC_ADDRESS, balanceUSDC - amountUSDC); // system lose via credit
-            fundsUnwinded[USDC_ADDRESS] += amountUSDC;
+        if (amountWBTC > 0) {
+            balanceWBTC = sub(IToken(WBTC_ADDRESS).balanceOf(address(this)), balanceWBTC);
+            if (amountWBTC > balanceWBTC) emit Credit(WBTC_ADDRESS, amountWBTC - balanceWBTC); // system lose via credit
+            fundsUnwinded[WBTC_ADDRESS] += amountWBTC;
         }
         if (amountETH > 0) {
             require(address(this).balance >= amountETH);
@@ -202,23 +230,30 @@ DSMath
 
     }
 
-    function boostFunds(uint256 amountDAI, uint256 amountUSDC, uint256 amountETH, IDfFinanceDeposits.FlashloanProvider _providerType, address flashLoanFromAddress) public onlyOwnerOrAdmin  {
+    function boostFunds(uint256 amountDAI, uint256 amountWBTC, uint256 amountETH, IDfFinanceDeposits.FlashloanProvider _providerType, address flashLoanFromAddress) public onlyOwnerOrAdmin  {
         if (amountDAI > fundsUnwinded[DAI_ADDRESS]) amountDAI = fundsUnwinded[DAI_ADDRESS];
-        if (amountUSDC > fundsUnwinded[USDC_ADDRESS]) amountUSDC = fundsUnwinded[USDC_ADDRESS];
+        if (amountWBTC > fundsUnwinded[WBTC_ADDRESS]) amountWBTC = fundsUnwinded[WBTC_ADDRESS];
         if (amountETH > fundsUnwinded[WETH_ADDRESS]) amountETH = fundsUnwinded[WETH_ADDRESS];
 
         uint256 flashLoanDAI;
-        uint256 flashLoanUSDC;
+        uint256 daiLoanForWBTC;
         uint256 daiLoanForEth; // flash loan for 1 ETH
-        (flashLoanDAI, flashLoanUSDC, daiLoanForEth) = getFlashLoanAmounts(amountDAI, amountUSDC, amountETH, true);
+        (flashLoanDAI, daiLoanForWBTC, daiLoanForEth) = getFlashLoanAmounts(amountDAI, amountWBTC, amountETH, true);
+
         if (amountDAI  > 0)  IToken(DAI_ADDRESS).transfer(address(dfWallet), amountDAI);
-        if (amountUSDC > 0)  IToken(USDC_ADDRESS).transfer(address(dfWallet), amountUSDC);
-        dfFinanceDeposits.deposit.value(amountETH)(dfWallet, amountDAI, amountUSDC, 0, flashLoanDAI, flashLoanUSDC, _providerType, flashLoanFromAddress);
+        if (amountWBTC > 0)  IToken(WBTC_ADDRESS).transfer(address(dfWallet), amountWBTC);
+
+        dfFinanceDeposits.deposit.value(amountETH)(dfWallet, amountDAI, amountWBTC, 0, flashLoanDAI, 0, _providerType, flashLoanFromAddress);
+
         if (amountDAI > 0) fundsUnwinded[DAI_ADDRESS] = sub(fundsUnwinded[DAI_ADDRESS], amountDAI);
-        if (amountUSDC > 0) fundsUnwinded[USDC_ADDRESS] = sub(fundsUnwinded[USDC_ADDRESS], amountUSDC);
+        if (amountWBTC > 0) fundsUnwinded[WBTC_ADDRESS] = sub(fundsUnwinded[WBTC_ADDRESS], amountWBTC);
         if (amountETH > 0) fundsUnwinded[WETH_ADDRESS] = sub(fundsUnwinded[WETH_ADDRESS], amountETH);
 
         uint256 totalDETH = sub(tokenETH.totalSupply(), amountETH);
         totalDaiLoanForEth = wdiv(add(wmul(totalDaiLoanForEth, totalDETH), daiLoanForEth), add(totalDETH, amountETH));
+
+        uint256 totalDWBTC = tokenWBTC.totalSupply();
+        // = ( totalDaiLoanForWBTC * totalDWBTC + daiLoanForWBTC ) / (totalDWBTC + amounts[1])
+        totalDaiLoanForWBTC = wdiv(add(wmul(totalDaiLoanForWBTC/* 18 */, totalDWBTC * 1e10/* 8+10 */), daiLoanForWBTC), add(totalDWBTC, amountWBTC) * 1e10); // convert WBTC to 1e18 (8+10)
     }
 }
