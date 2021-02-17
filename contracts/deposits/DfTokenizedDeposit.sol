@@ -118,13 +118,15 @@ contract DfTokenizedDeposit is
 
     mapping(uint256 => uint256) ethCoefSnapshoted;
 
-    IDfProxy constant dfProxy = IDfProxy(0x7a925f91a4583e87b355f6ce15b2c3bf26e3449f); // mainnet address
+    IDfProxy constant dfProxy = IDfProxy(0x7a925f91a4583E87b355f6CE15B2C3BF26E3449F); // mainnet address
     // we use extendedLogic contract due to Contract size limitations
     address constant extendedLogic = 0xdAE0aca4B9B38199408ffaB32562Bf7B3B0495fE; // TODO: set logic address
 
     IDfDepositToken public tokenWBTC;
 
     uint256 public totalDaiLoanForWBTC;
+    uint256 public btcCoef;
+    mapping(uint256 => uint256) btcCoefSnapshoted;
 
 //    function initialize() public initializer {
 //        address payable curOwner = 0xdAE0aca4B9B38199408ffaB32562Bf7B3B0495fE;
@@ -137,6 +139,7 @@ contract DfTokenizedDeposit is
         aaveFee = _aaveFee; // 1e18 * 9 / 100 / 100; // 0.09% * 1e18
         minCRate = _minCRate; // 74800; // 74.8%
         tokenWBTC = _tokenWBTC;
+        btcCoef = 1e18 / 2; // 50%
     }
 
     function setAaveFee(uint256 _newFee) public onlyOwner {
@@ -282,7 +285,7 @@ contract DfTokenizedDeposit is
         flashLoanDAI = wmul(amountDAI, _crate);
         if (amountWBTC > 0) {
             if (isDeposit) {               //   8     +       6                 +     6     -  2
-                daiLoanForWBTC = wmul(wmul(amountWBTC * compOracle.price("BTC") * _daiPrice / 1e2, _ethCoef), (_crate + 1e18)); // 8 + 6 + 6 - 2 = 18
+                daiLoanForWBTC = wmul(wmul(amountWBTC * compOracle.price("BTC") * _daiPrice / 1e2, btcCoef), (_crate + 1e18)); // 8 + 6 + 6 - 2 = 18
             } else {
                 daiLoanForWBTC = wmul(totalDaiLoanForWBTC, amountWBTC * 1e10); // 8+10
             }
@@ -363,9 +366,13 @@ contract DfTokenizedDeposit is
             if (_ethCoef == 0) _ethCoef = ethCoef;
             require(_ethCoef < 1e18); // less then 100%
 
+            uint256 _btcCoef = btcCoefSnapshoted[snapshotId];
+            if (_btcCoef == 0) _btcCoef = btcCoef;
+            require(_btcCoef < 1e18); // less then 100%
+
             totalETHLiquidity = wmul(mul(tokenETH.balanceOfAt(userAddress, newId), priceETH) / 1e6, _ethCoef); // wmul(18+6-6,18), ETH price 6 decimals
 
-            totalWBTCLiquidity = wmul(mul(tokenWBTC.balanceOfAt(userAddress, newId), priceWBTC) * 1e4, _ethCoef); // wmul(8+6+4,18),
+            totalWBTCLiquidity = wmul(mul(tokenWBTC.balanceOfAt(userAddress, newId), priceWBTC) * 1e4, _btcCoef); // wmul(8+6+4,18),
 
             totalLiquidity += totalETHLiquidity + totalWBTCLiquidity;
 
@@ -374,7 +381,7 @@ contract DfTokenizedDeposit is
                 // totalSupplay for rewards distribution (we extract from eth `ethCoef`% DAI)
                 totalSupplay +=
                 wmul(mul(tokenETH.totalSupplyAt(newId), priceETH) / 1e6, _ethCoef) + // ETH price 6 decimals, 18+6-6
-                wmul(mul(tokenWBTC.totalSupplyAt(newId), priceWBTC) * 1e4, _ethCoef); // wmul(8+6+4,18),
+                wmul(mul(tokenWBTC.totalSupplyAt(newId), priceWBTC) * 1e4, _btcCoef); // wmul(8+6+4,18),
             }
         }
 
@@ -536,8 +543,8 @@ contract DfTokenizedDeposit is
         path[2] = DAI_ADDRESS;
         address [] memory ctokens = new address[](3);
         ctokens[0] = CDAI_ADDRESS;
-        ctokens[1] = CETH_ADDRESS;
-        ctokens[2] = CWBTC_ADDRESS;
+        ctokens[1] = CETH_ADDRESS;  // TODO: move to params ?
+        ctokens[2] = CWBTC_ADDRESS; // TODO: move to params ?
 
         uint256 amount = dfFinanceDeposits.claimComps(dfWallet, ctokens);
         ProfitData memory p;
@@ -591,6 +598,7 @@ contract DfTokenizedDeposit is
         tokenWBTC.snapshot(compOracle.price("BTC"));
 
         ethCoefSnapshoted[profits.length - 1] = ethCoef;
+        btcCoefSnapshoted[profits.length - 1] = btcCoef;
         lastFixProfit = now;
         return p.daiProfit;
     }
@@ -607,6 +615,11 @@ contract DfTokenizedDeposit is
     function changeEthCoef(uint256 _newCoef) public onlyOwnerOrAdmin {
         require(_newCoef < 2e18); // normal - 50% == 0.5 == 1e18 / 2
         ethCoef = _newCoef;
+    }
+
+    function changeBtcCoef(uint256 _newCoef) public onlyOwnerOrAdmin {
+        require(_newCoef < 2e18); // normal - 50% == 0.5 == 1e18 / 2
+        btcCoef = _newCoef;
     }
 
     function changeCRate(uint256 _newRate) public onlyOwnerOrAdmin {
