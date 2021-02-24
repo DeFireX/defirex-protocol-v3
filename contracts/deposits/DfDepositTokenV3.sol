@@ -17,14 +17,14 @@ contract DfDepositToken is
     ERC20Delegatable
 {
     mapping(uint256 => uint256) public prices;
-    uin256 public offset;
+    uint256 public offset;
     // ** INITIALIZER **
 
     function initialize(
         string memory _name,
         string memory _symbol,
         uint8 _decimals,
-        address payable _controller
+        address payable _controller,
         uint256 _offset
     ) public initializer {
         // Initialize Parents Contracts

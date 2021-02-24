@@ -9,8 +9,8 @@ import "../../upgradable/OwnableUpgradable.sol";
 import "../../utils/UniversalERC20.sol";
 
 // **INTERFACES**
-import "../interfaces/IDfDepositToken.sol";
-import "../interfaces/ITransferAndCall.sol";
+import "../../interfaces/IDfDepositToken.sol";
+import "../../interfaces/ITransferAndCall.sol";
 import "../../interfaces/IERC20.sol";
 import "../../interfaces/IToken.sol";
 
