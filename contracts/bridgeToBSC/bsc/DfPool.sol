@@ -13,6 +13,7 @@ import "../../interfaces/IDfDepositToken.sol";
 import "../../interfaces/ITransferAndCall.sol";
 import "../../interfaces/IERC20.sol";
 import "../../interfaces/IToken.sol";
+import "../../interfaces/IDfVenusFarm.sol";
 
 contract DfPool is Initializable, OwnableUpgradable, DSMath {
     using UniversalERC20 for IToken;
@@ -35,7 +36,9 @@ contract DfPool is Initializable, OwnableUpgradable, DSMath {
     event Profit(address indexed user, uint64 index, uint64 daiProfit);
     event CreateDfProfit(address indexed dfProfit);
 
-    // ** INITIALIZER – Constructor for Upgradable contracts **
+    IDfVenusFarm constant dfVenusFarm = IDfVenusFarm(0x7a8d722F7083495ea436f9216a76e02836CB842a);
+
+// ** INITIALIZER – Constructor for Upgradable contracts **
     function initialize() public initializer {
         OwnableUpgradable.initialize(msg.sender);    // Initialize Parent Contract
     }
@@ -100,7 +103,13 @@ contract DfPool is Initializable, OwnableUpgradable, DSMath {
         // dDai.transferFrom(msg.sender, address(this), _amount);
         dDai.burnFrom(msg.sender, _amount); // use burnFrom & mint to emulate transferFrom (user don't need to approve)
         dDai.mint(address(this), _amount);
-        dai.transfer(msg.sender, _amount);
+        if (dai.balanceOf(address(this)) >= _amount) {
+            dai.transfer(msg.sender, _amount);
+        } else {
+            dfVenusFarm.withdraw(_amount);
+            dai.transfer(msg.sender, _amount);
+        }
+
     }
 
     function userClaimProfit(uint64 max) public {
@@ -148,6 +157,20 @@ contract DfPool is Initializable, OwnableUpgradable, DSMath {
         // UPD state
         profits.push(p);
         dDai.snapshot();
+    }
+
+    function moveDaiToVenusFarm(uint256 _amount) public onlyOwner {
+        if (dai.allowance(address(this), address(dfVenusFarm)) != uint(-1)) {
+            dai.approve(address(dfVenusFarm), uint(-1));
+        }
+        dfVenusFarm.deposit(_amount);
+    }
+
+    function extractDaiFromVenusFarm(uint256 _amount) public onlyOwner {
+        if(_amount == uint256(-1)) {
+            _amount = dfVenusFarm.getFundsByAccount(address(this));
+        }
+        dfVenusFarm.withdraw(_amount);
     }
 
     function selfClaimProfit(uint64 max) public onlyOwner {

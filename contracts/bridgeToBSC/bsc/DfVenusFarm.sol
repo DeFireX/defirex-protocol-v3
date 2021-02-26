@@ -1,7 +1,3 @@
-/**
- *Submitted for verification at BscScan.com on 2021-02-02
-*/
-
 // SPDX-License-Identifier: MIT
 
 pragma solidity 0.6.12;
@@ -1440,10 +1436,6 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
     uint256 public constant controllerFeeMax = 10000; // 100 = 1%
     uint256 public constant controllerFeeUL = 5000; // 50% upperlimit
 
-    uint256 public entranceFeeFactor = 9990; // < 0.1% entrance fee - goes to pool + prevents front-running
-    uint256 public constant entranceFeeFactorMax = 10000;
-    uint256 public constant entranceFeeFactorLL = 9950; // 0.5% is the max entrance fee settable. LL = lowerlimit
-
     address[] public venusToWantPath;
 
     /**
@@ -1471,15 +1463,11 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
      */
     event StratRebalance(uint256 _borrowRate, uint256 _borrowDepth);
 
-    constructor(
-        address _wantAddress,
-        address _vTokenAddress,
-        address _uniRouterAddress
-    ) public {
-        wantAddress = address(0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3);
+    constructor() public {
+        wantAddress = address(0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3);
         venusToWantPath = [venusAddress, wbnbAddress, wantAddress];
 
-        vTokenAddress = address(0x334b3ecb4dca3593bccc3c7ebd1a1c1d1780fbf1);
+        vTokenAddress = address(0x334b3eCB4DCa3593BCCC3c7EBD1A1C1d1780FBF1);
         venusMarkets = [vTokenAddress];
         uniRouterAddress = address(0x05fF2B0DB69458A0750badebc4f9e13aDd608C7F);
 
@@ -1702,11 +1690,10 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
             );
         }
 
-
         uint256 _earnedWant = IERC20(wantAddress).balanceOf(address(this));
 
         uint256 _devFee  = _earnedWant.mul(controllerFee).div(controllerFeeMax);
-        IERC20(wantAddress).safeTransfer(owner, _devFee);
+        IERC20(wantAddress).safeTransfer(owner(), _devFee);
 
         lastEarnBlock = block.number;
 
@@ -1802,12 +1789,6 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
         } else {
             return wantBal;
         }
-    }
-
-    function setEntranceFeeFactor(uint256 _entranceFeeFactor) public onlyOwner {
-        require(_entranceFeeFactor > entranceFeeFactorLL, "!safe - too low");
-        require(_entranceFeeFactor <= entranceFeeFactorMax, "!safe - too high");
-        entranceFeeFactor = _entranceFeeFactor;
     }
 
     function setControllerFee(uint256 _controllerFee) public onlyOwner {
