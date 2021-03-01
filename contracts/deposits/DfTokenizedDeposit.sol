@@ -444,27 +444,27 @@ contract DfTokenizedDeposit is
     }
 
     // claiming profit for uniswap pool
-    function claimProfitForUniswap() public {
-        require(msg.sender == tx.origin);
-
-        uint64 index;
-        uint256 totalDaiProfit;
-        address _uniswapAddress = getUniswapAddress();
-        (, totalDaiProfit, index) = calcUserProfit(_uniswapAddress, uint256(-1));
-
-        lastProfitDistIndex[_uniswapAddress] = index;
-
-        if (totalDaiProfit > 0) {
-            dfProfits.cast(address(uint160(DAI_ADDRESS)), abi.encodeWithSelector(IToken(DAI_ADDRESS).transfer.selector, _uniswapAddress, totalDaiProfit));
-            (uint reserveIn, uint reserveOut,) = IUniswapV2Pair(_uniswapAddress).getReserves();
-            uint amountInWithFee = mul(totalDaiProfit / 2, 997);
-            uint numerator = mul(amountInWithFee, reserveOut);
-            uint denominator = add(mul(reserveIn, 1000), amountInWithFee);
-            uint amountOut = numerator / denominator;
-            IUniswapV2Pair(_uniswapAddress).swap(amountOut, 0, address(_uniswapAddress), new bytes(0));
-            IUniswapV2Pair(_uniswapAddress).sync();
-        }
-    }
+//    function claimProfitForUniswap() public {
+//        require(msg.sender == tx.origin);
+//
+//        uint64 index;
+//        uint256 totalDaiProfit;
+//        address _uniswapAddress = getUniswapAddress();
+//        (, totalDaiProfit, index) = calcUserProfit(_uniswapAddress, uint256(-1));
+//
+//        lastProfitDistIndex[_uniswapAddress] = index;
+//
+//        if (totalDaiProfit > 0) {
+//            dfProfits.cast(address(uint160(DAI_ADDRESS)), abi.encodeWithSelector(IToken(DAI_ADDRESS).transfer.selector, _uniswapAddress, totalDaiProfit));
+//            (uint reserveIn, uint reserveOut,) = IUniswapV2Pair(_uniswapAddress).getReserves();
+//            uint amountInWithFee = mul(totalDaiProfit / 2, 997);
+//            uint numerator = mul(amountInWithFee, reserveOut);
+//            uint denominator = add(mul(reserveIn, 1000), amountInWithFee);
+//            uint amountOut = numerator / denominator;
+//            IUniswapV2Pair(_uniswapAddress).swap(amountOut, 0, address(_uniswapAddress), new bytes(0));
+//            IUniswapV2Pair(_uniswapAddress).sync();
+//        }
+//    }
 
     // we use extendedLogic contract due to Contract size limitations
     function delegateCall(bytes memory data) onlyOwnerOrAdmin public returns (bytes memory response)  {
@@ -473,17 +473,14 @@ contract DfTokenizedDeposit is
         require(success);
     }
 
-    function skipProfits(address _target, uint64 newProfitIndex) onlyOwnerOrAdmin public {
+    function skipProfits(address _target, uint64 _newProfitIndex) public {
         require((_target == msg.sender) ||
                 (admins[msg.sender] && (_target == bridge || _target == getUniswapAddress())) ||
                 (IDefiController(_target).defiController() == msg.sender));
 
         uint256 currentProfitIndex = lastProfitDistIndex[_target];
-        require(newProfitIndex > currentProfitIndex); // only skip
-        uint256 balanceAtBlock;
-        (balanceAtBlock,,,) = userShare(_target, newProfitIndex + 1);
-        require(balanceAtBlock == 0); // check that newProfitIndex don't have a profit (but previous snapshots may have)
-        lastProfitDistIndex[_target] = newProfitIndex;
+        require(_newProfitIndex > currentProfitIndex); // only skip
+        lastProfitDistIndex[_target] = _newProfitIndex;
     }
 
     function claimProfitForLockedOnBridge() public onlyOwnerOrAdmin {
