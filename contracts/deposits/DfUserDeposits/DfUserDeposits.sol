@@ -3,27 +3,27 @@ pragma experimental ABIEncoderV2;
 
 import "@openzeppelin/upgrades/contracts/Initializable.sol";
 
-import "../access/FundsManager.sol";
-import "../access/Adminable.sol";
+import "../../access/FundsManager.sol";
+import "../../access/Adminable.sol";
 
-import "../constants/ConstantAddressesMainnet.sol";
+import "../../constants/ConstantAddressesMainnet.sol";
 
-import "../utils/DSMath.sol";
-import "../utils/SafeMath.sol";
+import "../../utils/DSMath.sol";
+import "../../utils/SafeMath.sol";
 
-import "../flashloan/base/FlashLoanReceiverBase.sol";
-import "../dydxFlashloan/FlashloanDyDx.sol";
+import "../../flashloan/base/FlashLoanReceiverBase.sol";
+import "../../dydxFlashloan/FlashloanDyDx.sol";
 
 // **INTERFACES**
-import "../compound/interfaces/ICToken.sol";
-import "../flashloan/interfaces/ILendingPool.sol";
-import "../interfaces/IDfWalletFactory.sol";
-import "../interfaces/IDfWallet.sol";
-import "../interfaces/IToken.sol";
-import "../interfaces/IComptrollerLensInterface.sol";
-import "../interfaces/IComptroller.sol";
-import "../interfaces/IWeth.sol";
-import "../interfaces/IDfProxy.sol";
+import "../../compound/interfaces/ICToken.sol";
+import "../../flashloan/interfaces/ILendingPool.sol";
+import "../../interfaces/IDfWalletFactory.sol";
+import "../../interfaces/IDfWallet.sol";
+import "../../interfaces/IToken.sol";
+import "../../interfaces/IComptrollerLensInterface.sol";
+import "../../interfaces/IComptroller.sol";
+import "../../interfaces/IWeth.sol";
+import "../../interfaces/IDfProxy.sol";
 
 
 interface IUniswapV2Router02 {
@@ -38,7 +38,7 @@ interface IUniswapV2Router02 {
     function factory() external view returns (address);
 }
 
-contract DfFinanceDeposits is
+contract DfUserDeposits is
     Initializable,
     DSMath,
     ConstantAddresses,
@@ -53,11 +53,6 @@ contract DfFinanceDeposits is
 
     IUniswapV2Router02 constant uniRouter = IUniswapV2Router02(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D); // same for kovan and mainnet
 
-    struct UserData {
-        address owner;
-        mapping(address => uint256) deposits;
-        uint96 gap;
-    }
 
     struct FlashloanData {
         address dfWallet;
@@ -101,9 +96,6 @@ contract DfFinanceDeposits is
     mapping(address => address) public ctokens;
     mapping(address => bool) public approvedTokens;
     mapping(address => address) public userWallet;
-
-//    mapping(address => UserData) public wallets;
-
     uint256 public fee;
 
 
@@ -251,7 +243,7 @@ contract DfFinanceDeposits is
         address targetToken = path[len - 1];
         uint256 bal = IToken(targetToken).balanceOf(address(this));
         uint256 _fee = bal * fee / 100;
-        IToken(targetToken).universalTransfer(owner(), _fee);
+        IToken(targetToken).universalTransfer(owner, _fee);
         bal = bal.sub(_fee);
         IToken(targetToken).universalTransfer(msg.sender, bal);
 
