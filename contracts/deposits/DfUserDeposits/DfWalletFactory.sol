@@ -84,7 +84,7 @@ contract DfWalletFactory is Ownable, CloneFactory {
     event DfWalletCreated(address dfWallet);
 
     constructor() public {
-        libraryAddress = address();  // TODO: set address
+        libraryAddress = address(0x1B24e7CB23E458bc202e11057F1B661d6cB61f6e);  // TODO: set address
     }
 
     function setLibraryAddress(address _libraryAddress) public onlyOwner {
