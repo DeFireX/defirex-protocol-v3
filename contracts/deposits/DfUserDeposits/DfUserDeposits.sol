@@ -95,7 +95,8 @@ contract DfUserDeposits is
     // token => ctoken
     mapping(address => address) public ctokens;
     mapping(address => bool) public approvedTokens;
-    mapping(address => address) public userWallet;
+    // wallet => user
+    mapping(address => address) public walletOwner;
     uint256 public fee;
 
 
@@ -106,6 +107,8 @@ contract DfUserDeposits is
     // ** ADDED STATES **
     // withdraw min ratio from cToken to Token conversion
     uint256 public withdrawMinRatio;
+
+    event Profit(address indexed userAddress, address indexed token, uint256 profit);
 
     // ** EVENTS **
 
@@ -169,6 +172,7 @@ contract DfUserDeposits is
         address depositTokenAddress,
         uint256 _amountDeposit,
         address boostTokenAddress,
+        uint256 _amountBoostDeposit,
         uint256 _amountBoost,
         FlashloanProvider flashloanType,
         address flashloanFromAddress,
@@ -176,10 +180,10 @@ contract DfUserDeposits is
     ) public payable onlyOwnerOrAdmin returns (uint256 liquidity, uint256 shortfall) {
         if (dfWallet == address(0)) {
             dfWallet = dfWalletFactory.createDfWallet();
-            userWallet[msg.sender] = dfWallet;
+            walletOwner[dfWallet] = msg.sender;
         }
 
-        require(userWallet[msg.sender] == dfWallet);
+        require(walletOwner[dfWallet] == msg.sender);
 
         address _ctokenDepositAddress = ctokens[depositTokenAddress];
         require(_ctokenDepositAddress != address(0));
@@ -192,7 +196,7 @@ contract DfUserDeposits is
         // Update states
 //        wallets[dfWallet][tokenAddress]= add(wallets[dfWallet][tokenAddress], _amountDeposit);
 
-        // Deposit ETH without boosting
+        // Deposit asset without boosting
         if (amountETH > 0 && depositTokenAddress == ETH_ADDRESS) {
             IDfWallet(dfWallet).deposit.value(amountETH)(depositTokenAddress, _ctokenDepositAddress, amountETH, address(0), address(0), 0);
         } else if (_amountDeposit > 0){
@@ -202,16 +206,17 @@ contract DfUserDeposits is
 
         // Boost
         if (_amountBoost > 0) {
+            if (_amountBoostDeposit > 0) IToken(boostTokenAddress).universalTransferFrom(msg.sender, dfWallet, _amountBoostDeposit);
             if (flashloanType == FlashloanProvider.DYDX
                 && _amountBoost > IToken(boostTokenAddress).balanceOf(SOLO_MARGIN_ADDRESS)
             ) {
                 // if dYdX lacks liquidity in USDC use ETH
                 _depositBoostUsingDyDxEth(
-                    dfWallet, boostTokenAddress, _ctokenBoostAddress, _amountBoost, _amountBoost
+                    dfWallet, boostTokenAddress, _ctokenBoostAddress, _amountBoostDeposit, _amountBoost
                 );
             } else {
                 _depositBoost(
-                    dfWallet, boostTokenAddress, _ctokenBoostAddress, _amountBoost, _amountBoost, flashloanType, flashloanFromAddress
+                    dfWallet, boostTokenAddress, _ctokenBoostAddress, _amountBoostDeposit, _amountBoost, flashloanType, flashloanFromAddress
                 );
             }
         }
@@ -225,7 +230,7 @@ contract DfUserDeposits is
     // CLAIM function
 
     function claimComps(address dfWallet, address[] memory cTokens, address[] memory path, uint256 _minAmount) public returns(uint256) {
-        require(userWallet[msg.sender] == dfWallet);
+        require(walletOwner[dfWallet] == msg.sender);
 
         IDfWallet(dfWallet).claimComp(cTokens);
 
@@ -247,6 +252,7 @@ contract DfUserDeposits is
         bal = bal.sub(_fee);
         IToken(targetToken).universalTransfer(msg.sender, bal);
 
+        emit Profit(msg.sender, targetToken, bal);
         return bal;
     }
 
@@ -258,13 +264,14 @@ contract DfUserDeposits is
         address depositTokenAddress,
         uint256 _amountDeposit,
         address boostTokenAddress,
+        uint256 _amountBoostDeposited,
         uint256 _amountBoost,
         address receiver,
         FlashloanProvider flashloanType,
         address flashloanFromAddress,
         bool bCheckLiquidity
     ) public onlyOwnerOrAdmin returns (uint256 liquidity, uint256 shortfall){
-        require(userWallet[msg.sender] == dfWallet);
+        require(walletOwner[dfWallet] == msg.sender);
         require(receiver != address(0));
 
         address _ctokenDepositAddress = ctokens[depositTokenAddress];
@@ -273,14 +280,19 @@ contract DfUserDeposits is
         address _ctokenBoostAddress = ctokens[boostTokenAddress];
         require(_ctokenBoostAddress != address(0));
 
-        // Withdraw assets
-        _withdrawBoostedAsset(
-            dfWallet, boostTokenAddress, _ctokenBoostAddress, _amountBoost, receiver, _amountBoost, flashloanType, flashloanFromAddress
-        );
+        if (_amountBoost > 0) {
+            // Withdraw assets
+            _withdrawBoostedAsset(
+                dfWallet, boostTokenAddress, _ctokenBoostAddress, _amountBoostDeposited, receiver, _amountBoost, flashloanType, flashloanFromAddress
+            );
+        }
 
-        _withdrawAsset(
-            dfWallet, depositTokenAddress, _ctokenDepositAddress, _amountDeposit, receiver
-        );
+        if (_amountDeposit > 0) {
+            _withdrawAsset(
+                dfWallet, depositTokenAddress, _ctokenDepositAddress, _amountDeposit, receiver
+            );
+        }
+
 
         if (bCheckLiquidity) {
             (, liquidity, shortfall) = IComptroller(COMPTROLLER).getAccountLiquidity(dfWallet);
