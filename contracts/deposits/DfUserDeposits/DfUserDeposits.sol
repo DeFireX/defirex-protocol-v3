@@ -177,7 +177,7 @@ contract DfUserDeposits is
         FlashloanProvider flashloanType,
         address flashloanFromAddress,
         bool bCheckLiquidity
-    ) public payable onlyOwnerOrAdmin returns (uint256 liquidity, uint256 shortfall) {
+    ) public payable onlyOwnerOrAdmin returns (uint256 liquidity) {
         if (dfWallet == address(0)) {
             dfWallet = dfWalletFactory.createDfWallet();
             walletOwner[dfWallet] = msg.sender;
@@ -222,7 +222,7 @@ contract DfUserDeposits is
         }
 
         if (bCheckLiquidity) {
-            (,liquidity, shortfall) = IComptroller(COMPTROLLER).getAccountLiquidity(dfWallet);
+            (,liquidity,) = IComptroller(COMPTROLLER).getAccountLiquidity(dfWallet);
         }
     }
 
