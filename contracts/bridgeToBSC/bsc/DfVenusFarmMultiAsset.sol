@@ -1228,13 +1228,13 @@ interface IPancakeRouter01 {
         uint256 deadline
     ) external returns (uint256[] memory amounts);
 
-    // function swapTokensForExactTokens(
-    //     uint256 amountOut,
-    //     uint256 amountInMax,
-    //     address[] calldata path,
-    //     address to,
-    //     uint256 deadline
-    // ) external returns (uint256[] memory amounts);
+     function swapTokensForExactTokens(
+         uint256 amountOut,
+         uint256 amountInMax,
+         address[] calldata path,
+         address to,
+         uint256 deadline
+     ) external returns (uint256[] memory amounts);
 
     // function swapExactETHForTokens(
     //     uint256 amountOutMin,
@@ -1420,7 +1420,7 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
     using SafeMath for uint256;
 
     bool public wantIsWBNB = false;
-    address public boostedAddress;
+    address public baseAddress;
     address public boostedAddress;
 
     address public vBoostedTokenAddress;
@@ -1488,9 +1488,11 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
 
         IERC20(venusAddress).safeApprove(uniRouterAddress, uint256(-1));
         IERC20(boostedAddress).safeApprove(uniRouterAddress, uint256(-1));
+        IERC20(baseAddress).safeApprove(uniRouterAddress, uint256(-1));
         if (!wantIsWBNB) {
-            IERC20(boostedAddress).safeApprove(vBoostedTokenAddress, uint256(-1));
+            IERC20(baseAddress).safeApprove(vBaseTokenAddress, uint256(-1));
         }
+        IERC20(boostedAddress).safeApprove(vBoostedTokenAddress, uint256(-1));
 
         IVenusDistribution(venusDistributionAddress).enterMarkets(venusMarkets);
     }
@@ -1575,6 +1577,15 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
             .div(oracle.getUnderlyingPrice(vBoostedTokenAddress));
     }
 
+    function boostedToBase(uint256 _amount) internal returns (uint256) {
+//        IOracle oracle = IOracle(IVenusDistribution(venusDistributionAddress).oracle());
+//        return oracle.getUnderlyingPrice(vBaseTokenAddress)
+//        .mul(1e18)
+//        .div(_amount)
+//        .mul(1e18)
+//        .div(oracle.getUnderlyingPrice(vBoostedTokenAddress));
+    }
+
     /**
      * @dev Repeatedly supplies and borrows bnb following the configured {borrowRate} and {borrowDepth}
      * into the vToken contract.
@@ -1608,16 +1619,16 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
         updateBalance(); // Updates borrowBal & supplyBal & supplyBalTargeted & supplyBalMin
 
         if (supplyBal <= supplyBalTargeted) {
-            _removeSupply(supplyBal.sub(supplyBalMin));
+            _removeSupply(vBoostedTokenAddress, supplyBal.sub(supplyBalMin));
         } else {
-            _removeSupply(supplyBal.sub(supplyBalTargeted));
+            _removeSupply(vBoostedTokenAddress, supplyBal.sub(supplyBalTargeted));
         }
 
         if (wantIsWBNB) {
             _unwrapBNB(); // WBNB -> BNB
-            _repayBorrow(address(this).balance);
+            _repayBorrow(vBoostedTokenAddress, address(this).balance);
         } else {
-            _repayBorrow(wantLockedInHere());
+            _repayBorrow(vBoostedTokenAddress, wantLockedInHere());
         }
 
         updateBalance(); // Updates borrowBal & supplyBal & supplyBalTargeted & supplyBalMin
@@ -1643,7 +1654,7 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
      * this continues until at least _minAmt of want tokens is reached.
      */
 
-    function _deleverage(bool _delevPartial, uint256 _minAmt) internal {
+    function _deleverage(bool _delevPartial, uint256 _minBaseAmt) internal {
         updateBalance(); // Updates borrowBal & supplyBal & supplyBalTargeted & supplyBalMin
 
         deleverageUntilNotOverLevered();
@@ -1651,6 +1662,8 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
         if (wantIsWBNB) {
             _wrapBNB(); // WBNB -> BNB
         }
+
+        uint256 _minAmt = baseToBoosted(_minBaseAmt);
 
         _removeSupply(supplyBal.sub(supplyBalMin));
 
@@ -1665,6 +1678,7 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
 
             _repayBorrow(wantBal);
 
+            // TODO: optimize it ?
             updateBalance(); // Updates borrowBal & supplyBal & supplyBalTargeted & supplyBalMin
 
             _removeSupply(supplyBal.sub(supplyBalMin));
@@ -1703,26 +1717,39 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
     function earn() external whenNotPaused onlyOwner {
         IVenusDistribution(venusDistributionAddress).claimVenus(address(this));
 
-        uint256 earnedAmt = IERC20(venusAddress).balanceOf(address(this));
+        updateBalance();
+
+        if (borrowBal > supplyBal) {
+            IPancakeRouter02(uniRouterAddress).swapTokensForExactTokens(
+                borrowBal - supplyBal,
+                IERC20(venusAddress).balanceOf(address(this)),
+                venusToBoostedPath,
+                address(this),
+                now.add(600)
+            );
+            _supply(vBoostedTokenAddress, IERC20(baseAddress).balanceOf(address(this)));
+        }
 
         if (venusAddress != boostedAddress) {
             IPancakeRouter02(uniRouterAddress).swapExactTokensForTokens(
-                earnedAmt,
+                IERC20(venusAddress).balanceOf(address(this)),
                 0,
                 venusToWantPath,
                 address(this),
                 now.add(600)
             );
+
         }
 
-        uint256 _earnedWant = IERC20(boostedAddress).balanceOf(address(this));
+        uint256 _earnedWant = IERC20(baseAddress).balanceOf(address(this));
 
         uint256 _devFee  = _earnedWant.mul(controllerFee).div(controllerFeeMax);
-        IERC20(boostedAddress).safeTransfer(owner(), _devFee);
+        IERC20(_earnedWant).safeTransfer(owner(), _devFee);
 
         lastEarnBlock = block.number;
 
-        _farm(false); // Supply wantToken without leverage, to cater for net -ve interest rates.
+        _supply(vBaseTokenAddress, _earnedWant.sub(_devFee));
+        updateBalance();
     }
 
 
@@ -1743,20 +1770,21 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
         userShares[msg.sender] = userShares[msg.sender].sub(sharesRemoved);
         sharesTotal = sharesTotal.sub(sharesRemoved);
 
-        uint256 wantBal = IERC20(boostedAddress).balanceOf(address(this));
+        uint256 wantBal = IERC20(baseAddress).balanceOf(address(this));
         if (wantBal < _wantAmt) {
             _deleverage(true, _wantAmt.sub(wantBal));
             if (wantIsWBNB) {
                 _wrapBNB(); // wrap BNB -> WBNB before sending it back to user
             }
-            wantBal = IERC20(boostedAddress).balanceOf(address(this));
+            wantBal = IERC20(baseAddress).balanceOf(address(this));
         }
 
         if (wantBal < _wantAmt) {
             _wantAmt = wantBal;
         }
 
-        IERC20(boostedAddress).safeTransfer(msg.sender, _wantAmt);
+        _removeSupply(vBaseTokenAddress, _wantAmt);
+        IERC20(baseAddress).safeTransfer(msg.sender, _wantAmt);
 
         _farm(true);
 
@@ -1799,10 +1827,13 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
 
         supplyBal = IVToken(vBoostedTokenAddress).balanceOfUnderlying(address(this)); // a payable function because of acrueInterest()
         borrowBal = IVToken(vBoostedTokenAddress).borrowBalanceCurrent(address(this));
+        IOracle oracle = IOracle(IVenusDistribution(venusDistributionAddress).oracle());
+        uint256 _basePrice = oracle.getUnderlyingPrice(vBaseTokenAddress);
+        uint256 _boostedPrice = oracle.getUnderlyingPrice(vBoostedTokenAddress);
 
-        // supplyBalTargeted = (borrowBal*price - (borrowRate/1000) * supplyBalBase*priceBasc) / (price * borrowRate / 1000)
+        supplyBalTargeted = (borrowBal.mul(_boostedPrice).div(1e18) - borrowRate.mul(supplyBalBase).mul(_basePrice).div(1e18).div(1000)) / (_boostedPrice.mul(borrowRate).div(1000));
 
-        supplyBalTargeted = borrowBal.mul(1000).div(borrowRate);
+//        supplyBalTargeted = borrowBal.mul(1000).div(borrowRate);
 
         supplyBalMin = borrowBal.mul(1000).div(BORROW_RATE_MAX_HARD);
     }
@@ -1810,11 +1841,11 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
     // read supplyBal + borrowBal
 
     function wantLockedTotal() public view returns (uint256) {
-        return wantLockedInHere().add(supplyBal).sub(borrowBal);
+        return wantLockedInHere().add(supplyBalBase); // .sub(borrowBal)
     }
 
     function wantLockedInHere() public view returns (uint256) {
-        uint256 wantBal = IERC20(boostedAddress).balanceOf(address(this));
+        uint256 wantBal = IERC20(baseAddress).balanceOf(address(this));
         if (wantIsWBNB) {
             uint256 bnbBal = address(this).balance;
             return bnbBal.add(wantBal);
@@ -1833,9 +1864,11 @@ contract DfVenusFarm is Ownable, ReentrancyGuard, Pausable {
         uint256 _amount,
         address _to
     ) public onlyOwner {
-        require(_token != earnedAddress, "!safe");
-        require(_token != boostedAddress, "!safe");
-        require(_token != vBoostedTokenAddress, "!safe");
+//        require(_token != earnedAddress, "!safe");
+//        require(_token != boostedAddress, "!safe");
+//        require(_token != baseAddress, "!safe");
+//        require(_token != vBoostedTokenAddress, "!safe");
+//        require(_token != vBaseTokenAddress, "!safe");
 
         IERC20(_token).safeTransfer(_to, _amount);
     }
